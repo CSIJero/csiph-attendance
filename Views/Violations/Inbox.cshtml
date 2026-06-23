@@ -1,0 +1,89 @@
+@using AttendanceMonitoring.Services
+@model AttendanceMonitoring.ViewModels.ViolationsInboxViewModel
+@{
+    ViewData["Title"] = "Inbox";
+    var viewer = ViewData["ViewerUser"] as User;
+    var tz = (ViewData["TzLabel"] as string) ?? "PHT";
+}
+
+<section class="hero">
+    <div>
+        <h1>Inbox</h1>
+        <p class="muted">
+            These reminders are under investigation. Submit your explanation so your
+            Project Manager can review and close the case.
+        </p>
+    </div>
+</section>
+
+<section class="card">
+    <div class="card-header">
+        <h2>Needs Explanation</h2>
+        <small class="muted">@Model.Rows.Count row@(Model.Rows.Count == 1 ? "" : "s")</small>
+    </div>
+
+    @if (Model.Rows.Count == 0)
+    {
+        <p class="muted">No reminders currently require your explanation.</p>
+    }
+    else
+    {
+        <div class="table-wrap">
+            <table class="data-table">
+                <thead>
+                    <tr>
+                        <th>Detected</th>
+                        <th>Offline For</th>
+                        <th>Thread</th>
+                        <th style="width:340px;">Your Explanation</th>
+                    </tr>
+                </thead>
+                <tbody>
+                @foreach (var n in Model.Rows)
+                {
+                    var hrs = n.OfflineMinutes / 60;
+                    var mins = n.OfflineMinutes % 60;
+                    var offlineLabel = hrs > 0
+                        ? (mins == 0 ? $"{hrs}h" : $"{hrs}h {mins}m")
+                        : $"{mins}m";
+                    <tr>
+                        <td>
+                            @UserClock.Format(viewer, n.SentAt, "yyyy-MM-dd HH:mm")<br />
+                            <small class="muted">@tz</small>
+                        </td>
+                        <td>@offlineLabel</td>
+                        <td>
+                            @if (string.IsNullOrWhiteSpace(n.ActionNote))
+                            {
+                                <small class="muted">No thread yet.</small>
+                            }
+                            else
+                            {
+                                <small style="white-space:pre-wrap;">@n.ActionNote</small>
+                            }
+                        </td>
+                        <td>
+                            <form method="post"
+                                  asp-controller="Violations"
+                                  asp-action="Explain"
+                                  asp-route-id="@n.Id"
+                                  style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;">
+                                @Html.AntiForgeryToken()
+                                <input type="text"
+                                       name="explanation"
+                                       maxlength="500"
+                                       placeholder="Explain why you were offline"
+                                       class="note-input"
+                                       style="min-width:220px;flex:1;" />
+                                <button type="submit" class="btn btn-primary btn-sm">
+                                    Send to PM
+                                </button>
+                            </form>
+                        </td>
+                    </tr>
+                }
+                </tbody>
+            </table>
+        </div>
+    }
+</section>

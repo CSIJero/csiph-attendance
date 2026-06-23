@@ -1,0 +1,622 @@
+@model AdminDashboardViewModel
+@{
+    ViewData["Title"] = "Dashboard";
+    // Viewer-local timezone (IST for India BUs, PHT otherwise).
+    var viewer = ViewData["ViewerUser"] as User;
+    var tz = (ViewData["TzLabel"] as string) ?? "PHT";
+}
+
+@functions {
+    static string FormatOfflineFor(TimeSpan span)
+    {
+        if (span.TotalMinutes < 1) return "< 1 m";
+        if (span.TotalHours < 1) return $"{(int)span.TotalMinutes} m";
+        var h = (int)span.TotalHours;
+        var m = span.Minutes;
+        if (span.TotalDays < 1) return m == 0 ? $"{h} h" : $"{h} h {m} m";
+        var d = (int)span.TotalDays;
+        var hr = span.Hours;
+        return hr == 0 ? $"{d} d" : $"{d} d {hr} h";
+    }
+}
+
+@* ----------------------------------------------------------------------
+   Project Manager / Program Manager personal section — own check-in/out,
+   schedule, recent attendance, plus Break and Start-lunch controls.
+   Only rendered when the viewer is a PM or Program Manager;
+   pure admins skip this block.
+   ---------------------------------------------------------------------- *@
+@if (Model.IsPm)
+{
+    <section class="hero">
+        <div>
+            <h1>Hi, @Model.FirstName &#x1F44B;</h1>
+            <p class="muted">
+                Today is <strong>@Constants.WeekdayNames[Model.TodayIndex]</strong> &middot;
+                @if (Model.TodaySchedule is { IsWorking: true } ts
+                     && ts.StartTime is { } start
+                     && ts.EndTime is { } end)
+                {
+                    <text>scheduled <strong>@start.ToString("HH:mm")&ndash;@end.ToString("HH:mm")</strong> (@ts.Hours h)</text>
+                }
+                else
+                {
+                    <span class="muted">no shift scheduled</span>
+                }
+            </p>
+        </div>
+        <div class="hero-actions">
+            @if (Model.MyAttendance is { } att && att.IsOpen)
+            {
+                <form method="post" asp-controller="Attendance" asp-action="CheckOut" class="inline">
+                    @Html.AntiForgeryToken()
+                    <button type="submit" class="btn btn-warn">
+                        Check out
+                    </button>
+                </form>
+                @* Break / Start lunch sit next to Check out — same controls
+                   employees get on their dashboard. Button IDs (#break-toggle
+                   and #lunch-toggle) are picked up by the global app.js
+                   handlers automatically; the API endpoints already accept
+                   any authenticated user. *@
+                <button type="button" class="btn btn-action btn-break" id="break-toggle"
+                        data-break-start-label="☕ Break"
+                        data-break-end-label="End break"
+                        data-break-max="@AttendanceMonitoring.Models.Constants.MaxShortBreaksPerDay"
+                        title="Take a 15-minute break (up to 2 per day). Pauses offline alerts.">
+                    ☕ Break
+                </button>
+                <button type="button" class="btn btn-action btn-lunch" id="lunch-toggle"
+                        data-lunch-start-label="🍽 Start lunch"
+                        data-lunch-end-label="End lunch"
+                        data-lunch-max="@AttendanceMonitoring.Models.Constants.MaxLunchesPerDay"
+                        title="Pause offline alerts for 1 hour. Only 1 lunch break per day.">
+                    🍽 Start lunch
+                </button>
+                <span class="muted">Checked in at @UserClock.Format(viewer, att.CheckIn, "HH:mm") @tz</span>
+                @if (Model.MyLate is { Status: LateCheck.LateStatus.Late } late)
+                {
+                    var h = late.LateMinutes / 60;
+                    var m = late.LateMinutes % 60;
+                    var lbl = h > 0 ? $"Late {h:D2}:{m:D2}" : $"Late {m} min";
+                    <span class="badge badge-active"
+                          style="margin-left:6px;"
+                          title="@late.WorkType, grace @late.GraceMinutes min">@lbl</span>
+                }
+                else if (Model.MyLate is { Status: LateCheck.LateStatus.OnTime })
+                {
+                    <span class="badge badge-done"
+                          style="margin-left:6px;"
+                          title="@Model.MyLate.WorkType, grace @Model.MyLate.GraceMinutes min">On time</span>
+                }
+            }
+            else if (Model.MyAttendance is { } closed)
+            {
+                <span class="badge badge-done">
+                    Completed today &middot; @PhTime.FormatDurationMinutes(closed.DurationMinutes)
+                </span>
+            }
+            else
+            {
+                <form method="post" asp-controller="Attendance" asp-action="CheckIn" class="inline selfie-form">
+                    @Html.AntiForgeryToken()
+                    <input type="hidden" name="photo" value="" />
+                    <button type="button" class="btn btn-primary"
+                            data-selfie-trigger data-selfie-action="check-in">
+                        Check in
+                    </button>
+                </form>
+            }
+        </div>
+    </section>
+
+    @if (Model.MyAttendance is { IsOpen: true })
+    {
+        @* Quota-reset request entry point for PMs too. Even though a PM
+           can approve other people's resets, they cannot approve their
+           own \u2014 the queue still has to be touched by another admin /
+           PM. Same form as the employee dashboard. *@
+        <details class="quota-reset-panel" style="margin:12px 0;padding:10px 14px;border:1px solid var(--border, #e0e0e0);border-radius:8px;background:var(--card-bg, #fff);">
+            <summary style="cursor:pointer;font-weight:600;">
+                Need another break or lunch? Request a reset
+            </summary>
+            <p class="muted" style="margin-top:8px;font-size:0.9rem;">
+                Submits a request to the Requests queue. Another admin /
+                PM must approve before your counter is reset for today.
+            </p>
+            <div style="display:flex;gap:14px;flex-wrap:wrap;">
+                <form method="post"
+                      asp-controller="Dashboard" asp-action="RequestQuotaReset"
+                      style="flex:1 1 240px;min-width:240px;">
+                    @Html.AntiForgeryToken()
+                    <input type="hidden" name="kind" value="break" />
+                    <label class="muted" style="font-size:0.85rem;">Reason (break)</label>
+                    <input type="text" name="reason" maxlength="500"
+                           placeholder="e.g. need to take medication"
+                           class="note-input" style="width:100%;margin:4px 0 6px;" />
+                    <button type="submit" class="btn btn-action btn-break btn-sm">
+                        Request break reset
+                    </button>
+                </form>
+                <form method="post"
+                      asp-controller="Dashboard" asp-action="RequestQuotaReset"
+                      style="flex:1 1 240px;min-width:240px;">
+                    @Html.AntiForgeryToken()
+                    <input type="hidden" name="kind" value="lunch" />
+                    <label class="muted" style="font-size:0.85rem;">Reason (lunch)</label>
+                    <input type="text" name="reason" maxlength="500"
+                           placeholder="e.g. meeting ran into my lunch"
+                           class="note-input" style="width:100%;margin:4px 0 6px;" />
+                    <button type="submit" class="btn btn-action btn-lunch btn-sm">
+                        Request lunch reset
+                    </button>
+                </form>
+            </div>
+        </details>
+    }
+
+    <section class="card">
+        <div class="card-header">
+            <h2>This week</h2>
+            <small class="muted">Week of @Model.WeekStart.ToString("MMM d, yyyy") &middot; set by your administrator.</small>
+        </div>
+        <div class="schedule-grid">
+            @foreach (var entry in Model.Schedule)
+            {
+                var classes = new List<string> { "schedule-day" };
+                if (entry.WorkDate == PhTime.Today) classes.Add("is-today");
+                if (!entry.IsWorking) classes.Add("is-off");
+                Model.WeekHolidays.TryGetValue(entry.WorkDate, out var holiday);
+                <div class="@string.Join(' ', classes)">
+                    <div class="schedule-day-name">@entry.WorkDate.ToString("ddd, MMM d")</div>
+                    @if (entry.IsWorking
+                         && entry.StartTime is { } st
+                         && entry.EndTime is { } et)
+                    {
+                        <div class="schedule-day-time">
+                            @st.ToString("HH:mm") &ndash; @et.ToString("HH:mm")
+                        </div>
+                        <div class="schedule-day-hours muted">@entry.Hours h</div>
+                        <div class="schedule-day-note">@entry.EffectiveWorkType</div>
+                    }
+                    else
+                    {
+                        var nonWorkingLabel = entry.EffectiveWorkType;
+                        if (string.Equals(nonWorkingLabel, "Dayoff", StringComparison.OrdinalIgnoreCase))
+                        {
+                            nonWorkingLabel = "Day off";
+                        }
+                        <div class="schedule-day-time muted">@nonWorkingLabel</div>
+                    }
+                    @if (holiday is not null)
+                    {
+                        <div class="schedule-day-note">
+                            <span class="badge badge-warn">Holiday</span> @holiday.Name
+                        </div>
+                    }
+                </div>
+            }
+        </div>
+    </section>
+
+    <section class="card">
+        <div class="card-header">
+            <h2>My recent attendance</h2>
+            <a asp-controller="Attendance" asp-action="Index" class="muted">View all &rarr;</a>
+        </div>
+        <div class="table-wrap">
+            <table class="data-table">
+                <thead>
+                    <tr>
+                        <th>Date</th>
+                        <th>Day</th>
+                        <th>Check-in</th>
+                        <th>Check-out</th>
+                        <th>Hours Rendered</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @if (Model.Recent.Count == 0)
+                    {
+                        <tr>
+                            <td colspan="5" class="muted">
+                                No attendance records yet — check in above to get started.
+                            </td>
+                        </tr>
+                    }
+                    else
+                    {
+                        foreach (var r in Model.Recent)
+                        {
+                            var wdIdx = ((int)r.WorkDate.DayOfWeek + 6) % 7;
+                            <tr>
+                                <td>@r.WorkDate.ToString("yyyy-MM-dd")</td>
+                                <td>@Constants.WeekdayNames[wdIdx]</td>
+                                <td>@UserClock.Format(viewer, r.CheckIn, "HH:mm")</td>
+                                <td>
+                                    @if (r.CheckOut is not null)
+                                    {
+                                        @UserClock.Format(viewer, r.CheckOut, "HH:mm")
+                                    }
+                                    else
+                                    {
+                                        <span class="muted">—</span>
+                                    }
+                                </td>
+                                <td>
+                                    @if (r.CheckOut is not null)
+                                    {
+                                        @PhTime.FormatDurationMinutes(r.DurationMinutes)
+                                    }
+                                    else
+                                    {
+                                        <span class="badge badge-active">in progress</span>
+                                    }
+                                </td>
+                            </tr>
+                        }
+                    }
+                </tbody>
+            </table>
+            @if (Model.Recent.Count > 0)
+            {
+                var completedCount = Model.Recent.Count(r => r.CheckOut is not null);
+                <p class="muted" style="margin-top:10px;">
+                    Total of last @completedCount completed entries:
+                    <strong>@PhTime.FormatDurationLong(Model.RecentMinutes)</strong>
+                </p>
+            }
+        </div>
+    </section>
+}
+
+<section class="hero">
+    <div>
+        <h1>Dashboard</h1>
+        <p class="muted">Live presence, today's check-ins and team status.</p>
+    </div>
+</section>
+
+<section class="kpis">
+    <div class="kpi kpi-online">
+        <div class="kpi-label">Online now</div>
+        <div class="kpi-value" data-kpi="online">@Model.OnlineCount</div>
+    </div>
+    <div class="kpi kpi-lunch">
+        <div class="kpi-label">On lunch</div>
+        <div class="kpi-value" data-kpi="lunch">@Model.LunchCount</div>
+    </div>
+    <div class="kpi kpi-offline">
+        <div class="kpi-label">Offline</div>
+        <div class="kpi-value" data-kpi="offline">@Model.OfflineCount</div>
+    </div>
+    <div class="kpi kpi-present">
+        <div class="kpi-label">Present today</div>
+        <div class="kpi-value" data-kpi="present">@Model.PresentCount</div>
+    </div>
+    <div class="kpi kpi-total">
+        <div class="kpi-label">Total users</div>
+        <div class="kpi-value" data-kpi="total">@Model.TotalUsers</div>
+    </div>
+</section>
+
+<section class="card">
+    <div class="card-header">
+        <h2>Team status</h2>
+        <small class="muted">Auto-refreshes every 15s &middot; <span id="last-refresh">just now</span></small>
+    </div>
+    <div class="table-wrap">
+        <table class="data-table" id="status-table">
+            <thead>
+                <tr>
+                    <th class="sortable" data-sort-key="status">Status<span class="sort-indicator"></span></th>
+                    <th class="sortable" data-sort-key="name">Name<span class="sort-indicator"></span></th>
+                    <th class="sortable" data-sort-key="business-unit">Business Unit<span class="sort-indicator"></span></th>
+                    <th class="sortable" data-sort-key="clock-in">Clock-in<span class="sort-indicator"></span></th>
+                    <th class="sortable" data-sort-key="clock-out">Clock-out<span class="sort-indicator"></span></th>
+                    <th class="sortable" data-sort-key="duration">Hours Rendered<span class="sort-indicator"></span></th>
+                    <th class="sortable" data-sort-key="last-seen">Last seen<span class="sort-indicator"></span></th>
+                    <th class="sortable" data-sort-key="offline-for">Offline for<span class="sort-indicator"></span></th>
+                    <th class="sortable" data-sort-key="unit">Device Location<span class="sort-indicator"></span></th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var row in Model.Rows)
+                {
+                    var stateLabel = row.State switch
+                    {
+                        "online" => "Online",
+                        "lunch" => "Lunch",
+                        _ => "Offline",
+                    };
+                    <tr data-user-id="@row.User.Id">
+                        <td>
+                            <span class="dot dot-@row.State"
+                                  data-cell="dot"
+                                  title="@stateLabel"></span>
+                            <span data-cell="status-text">@stateLabel</span>
+                        </td>
+                        <td>
+                            <a href="#"
+                               class="user-link"
+                               data-cell="name"
+                               data-user-id="@row.User.Id"
+                               data-user-name="@row.User.FullName">@row.User.FullName</a>
+                            @if (row.TodaySchedule is { } ts)
+                            {
+                                var wt = ts.EffectiveWorkType;
+                                if (wt.Equals("Onleave", StringComparison.OrdinalIgnoreCase))
+                                {
+                                    <span class="badge badge-active" data-cell="worktype-flag" style="margin-left:6px;">Onleave</span>
+                                }
+                                else if (wt.Equals("Holiday", StringComparison.OrdinalIgnoreCase))
+                                {
+                                    <span class="badge badge-warn" data-cell="worktype-flag" style="margin-left:6px;">Holiday</span>
+                                }
+                                else
+                                {
+                                    <span data-cell="worktype-flag" hidden></span>
+                                }
+                            }
+                            else
+                            {
+                                <span data-cell="worktype-flag" hidden></span>
+                            }
+                        </td>
+                        <td data-cell="business-unit">
+                            @if (!string.IsNullOrWhiteSpace(row.User.BusinessUnit))
+                            {
+                                <span class="badge badge-bu">@row.User.BusinessUnit</span>
+                            }
+                            else
+                            {
+                                <span class="muted">&mdash;</span>
+                            }
+                        </td>
+                        <td data-cell="clock-in">
+                            @if (row.Attendance is { } a)
+                            {
+                                @UserClock.Format(viewer, a.CheckIn, "HH:mm")
+                                if (row.Late is { Status: LateCheck.LateStatus.Late } late)
+                                {
+                                    var h = late.LateMinutes / 60;
+                                    var m = late.LateMinutes % 60;
+                                    var lbl = h > 0 ? $"Late {h:D2}:{m:D2}" : $"Late {m} min";
+                                    <span class="badge badge-active"
+                                          style="margin-left:6px;"
+                                          title="@late.WorkType, grace @late.GraceMinutes min">@lbl</span>
+                                }
+                                else if (row.Late is { Status: LateCheck.LateStatus.OnTime })
+                                {
+                                    <span class="badge badge-done"
+                                          style="margin-left:6px;"
+                                          title="@row.Late.WorkType, grace @row.Late.GraceMinutes min">On time</span>
+                                }
+                            }
+                            else
+                            {
+                                <span class="muted">&mdash;</span>
+                            }
+                        </td>
+                        <td data-cell="clock-out">
+                            @if (row.Attendance is { } co && co.CheckOut is not null)
+                            {
+                                @UserClock.Format(viewer, co.CheckOut, "HH:mm")
+                            }
+                            else if (row.Attendance is { } open && open.IsOpen)
+                            {
+                                <span class="badge badge-active">Working</span>
+                            }
+                            else
+                            {
+                                <span class="muted">&mdash;</span>
+                            }
+                        </td>
+                        <td data-cell="duration">
+                            @if (row.Attendance is { } d && !d.IsOpen)
+                            {
+                                @PhTime.FormatDurationMinutes(d.DurationMinutes)
+                            }
+                            else
+                            {
+                                <span class="muted">&mdash;</span>
+                            }
+                        </td>
+                        <td data-cell="last-seen">
+                            @if (row.User.LastSeen is not null)
+                            {
+                                @($"{UserClock.Format(viewer, row.User.LastSeen, "yyyy-MM-dd HH:mm")} {tz}")
+                            }
+                            else
+                            {
+                                <span class="muted">never</span>
+                            }
+                        </td>
+                        <td data-cell="offline-for" data-offline-minutes="@(row.Online ? -1 : (row.User.LastSeen is { } ls ? (int)Math.Max(0, (DateTime.UtcNow - DateTime.SpecifyKind(ls, DateTimeKind.Utc)).TotalMinutes) : -2))">
+                            @if (row.Online)
+                            {
+                                <span class="muted">&mdash;</span>
+                            }
+                            else if (row.User.LastSeen is { } off)
+                            {
+                                var offUtc = DateTime.SpecifyKind(off, DateTimeKind.Utc);
+                                var span = DateTime.UtcNow - offUtc;
+                                if (span < TimeSpan.Zero) span = TimeSpan.Zero;
+                                @FormatOfflineFor(span)
+                            }
+                            else
+                            {
+                                <span class="muted">never</span>
+                            }
+                        </td>
+                        <td data-cell="unit">
+                            @if (!string.IsNullOrEmpty(row.User.LastLoginLocation)
+                                || !string.IsNullOrEmpty(row.User.LastLoginHost)
+                                || !string.IsNullOrEmpty(row.User.LastLoginIp))
+                            {
+                                var locText = !string.IsNullOrEmpty(row.User.LastLoginLocation)
+                                    ? row.User.LastLoginLocation
+                                    : (!string.IsNullOrEmpty(row.User.LastLoginHost) ? row.User.LastLoginHost : "-");
+                                var ipText = string.IsNullOrEmpty(row.User.LastLoginIp) ? "-" : row.User.LastLoginIp;
+                                var isGps = string.Equals(row.User.LastLoginLocationSource, "gps",
+                                    StringComparison.OrdinalIgnoreCase);
+                                var sourceBadge = isGps ? "GPS" : "approx";
+                                var sourceTip = isGps
+                                    ? "Precise: browser GPS / Wi-Fi"
+                                    : "Approximate: IP-based geolocation (may be off by tens of km)";
+                                var tipParts = new List<string> { sourceTip };
+                                if (row.User.LastLoginAt is not null)
+                                    tipParts.Add($"Signed in {UserClock.Format(viewer, row.User.LastLoginAt, "yyyy-MM-dd HH:mm")} {tz}");
+                                if (!string.IsNullOrEmpty(row.User.LastLoginHost))
+                                    tipParts.Add($"Host: {row.User.LastLoginHost}");
+                                if (!string.IsNullOrEmpty(row.User.LastLoginAgent))
+                                    tipParts.Add($"Agent: {row.User.LastLoginAgent}");
+                                if (isGps && row.User.LastLoginLatitude is not null
+                                    && row.User.LastLoginLongitude is not null)
+                                {
+                                    tipParts.Add(
+                                        $"Coords: {row.User.LastLoginLatitude:F4}, {row.User.LastLoginLongitude:F4}");
+                                }
+                                var tip = string.Join(" \u2022 ", tipParts);
+                                <span class="unit-cell" title="@tip">
+                                    <span class="unit-host">
+                                        @locText
+                                        <span class="loc-source-badge @(isGps ? "is-gps" : "is-ip")">@sourceBadge</span>
+                                    </span>
+                                    <span class="unit-ip muted">@ipText</span>
+                                    @if (!string.IsNullOrEmpty(row.User.LastLoginAgent))
+                                    {
+                                        <span class="unit-agent muted" style="font-size:0.78rem;">
+                                            @row.User.LastLoginAgent
+                                        </span>
+                                    }
+                                </span>
+                            }
+                            else
+                            {
+                                <span class="muted">&mdash;</span>
+                            }
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+</section>
+
+@* Attendance modal — populated by app.js when a user name is clicked *@
+<div class="modal-backdrop" id="attendance-modal" hidden aria-hidden="true">
+    <div class="modal" role="dialog" aria-labelledby="attendance-modal-title" aria-modal="true">
+        <header class="modal-header">
+            <div>
+                <h3 id="attendance-modal-title">Attendance</h3>
+                <small class="muted" id="attendance-modal-subtitle"></small>
+            </div>
+            <button type="button" class="modal-close" data-modal-close aria-label="Close">&times;</button>
+        </header>
+
+        <div class="modal-body">
+            <section class="offsite-panel" id="offsite-panel" hidden>
+                <div class="offsite-panel-head">
+                    <strong>Offsite days pattern</strong>
+                    <small class="muted">
+                        Tick a day to flag it as <strong>Offsite</strong> (0 min grace, must clock in on time).
+                        Saving applies the same weekday pattern to the current and upcoming weeks.
+                        Untick to revert those Offsite days back to Dayoff. Onsite working days are not shown here &mdash;
+                        use the Schedule editor to change those.
+                    </small>
+                </div>
+                <div class="day-chips" id="offsite-chips" role="group" aria-label="Offsite days">
+                    @{
+                        var shortNames = new[] { "Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun" };
+                    }
+                    @for (var wd = 0; wd < 7; wd++)
+                    {
+                        <label class="day-chip" data-weekday="@wd">
+                            <input type="checkbox" data-offsite-day="@wd" />
+                            <span>@shortNames[wd]</span>
+                        </label>
+                    }
+                </div>
+                <div class="offsite-actions">
+                    <button type="button" class="btn btn-primary btn-sm" id="offsite-save">Save offsite days</button>
+                    <button type="button" class="btn btn-ghost btn-sm" id="offsite-reset">Reset</button>
+                    <span class="offsite-status muted" id="offsite-status" aria-live="polite"></span>
+                </div>
+            </section>
+
+            <form class="modal-filters" id="attendance-filters" onsubmit="return false;">
+                <label>
+                    <span>Start</span>
+                    <input type="date" name="start" />
+                </label>
+                <label>
+                    <span>End</span>
+                    <input type="date" name="end" />
+                </label>
+                <div class="modal-filter-actions">
+                    <button type="button" class="btn btn-primary" data-modal-apply>Apply</button>
+                    <button type="button" class="btn btn-ghost" data-modal-clear>Clear</button>
+                    <a class="btn btn-secondary" id="attendance-export" href="#" download
+                       data-confirm="Extract this user's attendance to Excel? The file will use the date filters currently selected in the modal.">
+                        Export to Excel
+                    </a>
+                </div>
+            </form>
+
+            <div class="table-wrap">
+                <table class="data-table" id="attendance-modal-table">
+                    <thead>
+                        <tr>
+                            <th>Date</th>
+                            <th>Clock-in</th>
+                            <th>Clock-out</th>
+                            <th>Hours Rendered</th>
+                            <th>Status</th>
+                            <th>Selfies</th>
+                            <th style="width:90px;">Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr><td colspan="7" class="muted">Loading…</td></tr>
+                    </tbody>
+                </table>
+            </div>
+            <small class="muted" id="attendance-modal-count"></small>
+        </div>
+    </div>
+</div>
+
+<div class="selfie-lightbox" id="selfie-lightbox" hidden>
+    <img id="selfie-lightbox-img" src="" alt="Selfie preview" />
+</div>
+
+@section Scripts {
+    <script>
+        (function () {
+            const lb = document.getElementById("selfie-lightbox");
+            const lbImg = document.getElementById("selfie-lightbox-img");
+            if (!lb || !lbImg) return;
+            document.addEventListener("click", (e) => {
+                const thumb = e.target.closest("[data-selfie-zoom]");
+                if (thumb) {
+                    lbImg.src = thumb.getAttribute("src");
+                    lb.hidden = false;
+                    return;
+                }
+                // Only the dim backdrop closes the lightbox. Clicking the
+                // image itself shouldn't dismiss it (you're trying to look at it).
+                if (!lb.hidden && e.target === lb) {
+                    lb.hidden = true;
+                    lbImg.removeAttribute("src");
+                }
+            });
+            document.addEventListener("keydown", (e) => {
+                if (!lb.hidden && e.key === "Escape") {
+                    lb.hidden = true;
+                    lbImg.removeAttribute("src");
+                }
+            });
+        })();
+    </script>
+}

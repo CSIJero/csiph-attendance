@@ -1,0 +1,163 @@
+@model NewUserViewModel
+@{
+    Layout = "_AuthLayout";
+    ViewData["Title"] = "Create account";
+    // Per-field validation errors surfaced from the controller. Each key
+    // corresponds to a property name on NewUserViewModel.
+    var fieldErrors = ViewBag.FieldErrors as Dictionary<string, string>
+                      ?? new Dictionary<string, string>();
+    string ErrCls(string key) => fieldErrors.ContainsKey(key) ? "has-error" : "";
+    string ErrMsg(string key) => fieldErrors.TryGetValue(key, out var m) ? m : "";
+}
+
+<div class="auth-card-v2 is-wide">
+    <div class="auth-card-head">
+        <h1>Register</h1>
+    </div>
+    <div class="auth-card-body">
+        <p class="auth-body-intro">
+            Register to start tracking your attendance. Your account will be
+            reviewed by an administrator before you can sign in.
+        </p>
+
+        @if (fieldErrors.Count > 0)
+        {
+            <div class="flash flash-danger" role="alert">
+                <strong>We couldn't create your account.</strong>
+                <ul class="error-list">
+                    @foreach (var kvp in fieldErrors)
+                    {
+                        <li>@kvp.Value</li>
+                    }
+                </ul>
+            </div>
+        }
+
+        <form method="post" asp-controller="Account" asp-action="Register" id="register-form">
+            @Html.AntiForgeryToken()
+
+            <label class="auth-label @ErrCls("FullName")">
+                <span class="auth-label-text">Full name <span class="req">*</span></span>
+                <input type="text" name="FullName" required
+                       minlength="2" maxlength="120"
+                       autocomplete="name"
+                       value="@Model.FullName"
+                       aria-invalid="@(fieldErrors.ContainsKey("FullName") ? "true" : "false")" />
+                @if (fieldErrors.ContainsKey("FullName"))
+                {
+                    <small class="auth-field-error">@ErrMsg("FullName")</small>
+                }
+            </label>
+
+            <label class="auth-label @ErrCls("Username")">
+                <span class="auth-label-text">Username <span class="req">*</span></span>
+                <input type="text" name="Username" required
+                       pattern="[A-Za-z0-9_.\-]{3,64}"
+                       title="3–64 characters: letters, digits, dot, underscore or hyphen."
+                       maxlength="64"
+                       autocomplete="username"
+                       value="@Model.Username"
+                       aria-invalid="@(fieldErrors.ContainsKey("Username") ? "true" : "false")" />
+                <small class="auth-field-hint">3–64 chars: letters, digits, dot, underscore, hyphen.</small>
+                @if (fieldErrors.ContainsKey("Username"))
+                {
+                    <small class="auth-field-error">@ErrMsg("Username")</small>
+                }
+            </label>
+
+            <label class="auth-label @ErrCls("Email")">
+                <span class="auth-label-text">Email <span class="req">*</span></span>
+                <input type="email" name="Email" required
+                       maxlength="200"
+                       autocomplete="email"
+                       value="@Model.Email"
+                       aria-invalid="@(fieldErrors.ContainsKey("Email") ? "true" : "false")" />
+                @if (fieldErrors.ContainsKey("Email"))
+                {
+                    <small class="auth-field-error">@ErrMsg("Email")</small>
+                }
+            </label>
+
+            <label class="auth-label @ErrCls("EmployeeId")">
+                <span class="auth-label-text">Employee ID <small class="muted">(optional)</small></span>
+                <input type="text" name="EmployeeId"
+                       placeholder="e.g. E000123 or E001234"
+                       pattern="E\d{6,7}"
+                       title="E followed by 6 or 7 digits."
+                       maxlength="8"
+                       value="@Model.EmployeeId"
+                       aria-invalid="@(fieldErrors.ContainsKey("EmployeeId") ? "true" : "false")" />
+                <small class="auth-field-hint">Format: E + 6&ndash;7 digits.</small>
+                @if (fieldErrors.ContainsKey("EmployeeId"))
+                {
+                    <small class="auth-field-error">@ErrMsg("EmployeeId")</small>
+                }
+            </label>
+
+            <label class="auth-label @ErrCls("BusinessUnit")">
+                <span class="auth-label-text">Business Unit <span class="req">*</span></span>
+                <select name="BusinessUnit" required
+                        aria-invalid="@(fieldErrors.ContainsKey("BusinessUnit") ? "true" : "false")">
+                    <option value="">— Select —</option>
+                    @foreach (var bu in Model.BusinessUnitChoices)
+                    {
+                        <option value="@bu" selected="@(string.Equals(Model.BusinessUnit, bu, StringComparison.OrdinalIgnoreCase))">@bu</option>
+                    }
+                </select>
+                <small class="auth-field-hint">BU2/BU3/BU4 are split by country (PH or IN) so the matching PM sees the right people.</small>
+                @if (fieldErrors.ContainsKey("BusinessUnit"))
+                {
+                    <small class="auth-field-error">@ErrMsg("BusinessUnit")</small>
+                }
+            </label>
+
+            @* Job title and "Assigned to" Project Manager are intentionally
+               *not* on the public registration form — they are admin-only
+               fields set later from the Users tab. Employees shouldn't pick
+               their own job label or their own manager at signup. *@
+
+            <label class="auth-label @ErrCls("Password")">
+                <span class="auth-label-text">Password <span class="req">*</span></span>
+                <input type="password" name="Password" required
+                       minlength="6" maxlength="200"
+                       autocomplete="new-password"
+                       pattern="(?=.*[A-Za-z])(?=.*\d).{6,}"
+                       title="At least 6 characters and must contain a letter and a digit."
+                       aria-invalid="@(fieldErrors.ContainsKey("Password") ? "true" : "false")" />
+                <small class="auth-field-hint">At least 6 characters, with one letter and one digit.</small>
+                @if (fieldErrors.ContainsKey("Password"))
+                {
+                    <small class="auth-field-error">@ErrMsg("Password")</small>
+                }
+            </label>
+
+            <div class="auth-actions">
+                <button type="submit" class="btn-auth">Register</button>
+                <a asp-controller="Account" asp-action="Login">Back to sign in</a>
+            </div>
+        </form>
+    </div>
+</div>
+
+<div class="auth-links">
+    <div class="auth-links-row">
+        Already have an account?
+        <a asp-controller="Account" asp-action="Login">Sign in</a>
+    </div>
+</div>
+
+@section Scripts {
+    <script>
+        // Add a `was-validated` class after the first submit so the
+        // browser's :invalid styling only kicks in once the user has
+        // tried to save — avoids screaming red borders on empty fields
+        // while the user is still typing.
+        (function () {
+            var form = document.getElementById('register-form');
+            if (!form) return;
+            form.addEventListener('submit', function () {
+                form.classList.add('was-validated');
+            }, false);
+        })();
+    </script>
+}

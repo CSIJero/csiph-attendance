@@ -1,0 +1,4 @@
+1	key-e1139cd8-835e-41d7-a23a-2614fe5961f8	<key id="e1139cd8-835e-41d7-a23a-2614fe5961f8" version="1"><creationDate>2026-05-21T15:50:42.4470976Z</creationDate><activationDate>2026-05-21T15:50:42.2446498Z</activationDate><expirationDate>2026-08-19T15:50:42.2446498Z</expirationDate><descriptor deserializerType="Microsoft.AspNetCore.DataProtection.AuthenticatedEncryption.ConfigurationModel.AuthenticatedEncryptorDescriptorDeserializer, Microsoft.AspNetCore.DataProtection, Version=8.0.0.0, Culture=neutral, PublicKeyToken=adb9793829ddae60"><descriptor><encryption algorithm="AES_256_CBC" /><validation algorithm="HMACSHA256" /><masterKey p4:requiresEncryption="true" xmlns:p4="http://schemas.asp.net/2015/03/dataProtection"><!-- Warning: the key below is in an unencrypted form. --><value>swyFmNLjMyoe05LLX+E0uQm3yq/cZGO6BuoODZXFXWKVz1kBVrRqliC0qbtlZwE+L3bD4tWlX7YhZNxsXb062Q==</value></masterKey></descriptor></descriptor></key>
+\.
+
+

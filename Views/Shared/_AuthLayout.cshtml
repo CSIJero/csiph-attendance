@@ -1,0 +1,51 @@
+@using AttendanceMonitoring.Helpers
+@using AttendanceMonitoring.Services
+@{
+    var nowPh = PhTime.Now;
+    var flashes = TempData.ConsumeFlashes();
+}
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>@ViewData["Title"] – Attendance Monitoring</title>
+    <link rel="icon" type="image/svg+xml" href="~/favicon.svg" />
+    <link rel="stylesheet" href="~/css/style.css" asp-append-version="true" />
+</head>
+<body class="auth-body">
+    @* Browser timezone bootstrap — write the viewer's offset + IANA name
+       to a cookie so subsequent pages render in their local timezone. *@
+    <script>
+        (function () {
+            try {
+                var minutes = -new Date().getTimezoneOffset();
+                var iana = '';
+                try { iana = Intl.DateTimeFormat().resolvedOptions().timeZone || ''; } catch (e) { iana = ''; }
+                var desired = minutes + '|' + iana;
+                var m = document.cookie.match(/(?:^|; )tz=([^;]*)/);
+                var current = m ? decodeURIComponent(m[1]) : null;
+                if (current !== desired) {
+                    document.cookie = 'tz=' + encodeURIComponent(desired)
+                        + '; path=/; max-age=2592000; SameSite=Lax';
+                }
+            } catch (e) { /* swallow */ }
+        })();
+    </script>
+    <div class="auth-page">
+        @if (flashes.Count > 0)
+        {
+            <div class="flashes">
+                @foreach (var f in flashes)
+                {
+                    <div class="flash flash-@f.Category">@f.Message</div>
+                }
+            </div>
+        }
+
+        @RenderBody()
+    </div>
+
+    @await RenderSectionAsync("Scripts", required: false)
+</body>
+</html>

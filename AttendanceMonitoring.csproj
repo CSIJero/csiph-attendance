@@ -1,0 +1,40 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>AttendanceMonitoring</RootNamespace>
+    <AssemblyName>AttendanceMonitoring</AssemblyName>
+    <UserSecretsId>attendance-monitoring-aspnet</UserSecretsId>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="ClosedXML" Version="0.104.2" />
+    <PackageReference Include="MailKit" Version="4.16.0" />
+    <PackageReference Include="Microsoft.AspNetCore.DataProtection.EntityFrameworkCore" Version="8.0.10" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Sqlite" Version="8.0.10" />
+    <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" Version="8.0.10" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Design" Version="8.0.10">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+    <!--
+      Direct ref to patch the High-severity System.Security.Cryptography.Xml
+      8.0.2 advisory (GHSA-37gx-xxp4-5rgx + GHSA-w3x6-4m5h-cxqf) that comes
+      in transitively through the DataProtection stack. 8.0.3 is the fixed
+      release in the .NET 8 servicing line.
+    -->
+    <PackageReference Include="System.Security.Cryptography.Xml" Version="8.0.3" />
+
+    <!--
+      System.Drawing.Common is used by Services/FaceHash.cs to decode the
+      check-in selfie into an 8×8 perceptual hash. On Linux deploys
+      (Render) it relies on libgdiplus; the Dockerfile installs that
+      package so this works on both Windows dev boxes and the container.
+    -->
+    <PackageReference Include="System.Drawing.Common" Version="8.0.10" />
+
+  </ItemGroup>
+
+</Project>

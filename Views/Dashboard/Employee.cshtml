@@ -1,0 +1,364 @@
+@model EmployeeDashboardViewModel
+@{
+    ViewData["Title"] = "My Dashboard";
+    var viewer = ViewData["ViewerUser"] as User;
+    var tz = (ViewData["TzLabel"] as string) ?? "PHT";
+    var todayHoliday = ViewBag.TodayHoliday as AttendanceMonitoring.Models.Holiday;
+}
+
+@if (todayHoliday is not null)
+{
+    <section class="card" style="border-left:4px solid #f59f00;">
+        <h2 style="margin:0;">@todayHoliday.Name</h2>
+        <p class="muted" style="margin:4px 0 0;">
+            Today is a @todayHoliday.Kind.ToLowerInvariant() holiday
+            (@todayHoliday.Country). Late-arrival rules are paused — clock in
+            only if you're covering an on-call shift.
+        </p>
+    </section>
+}
+
+<section class="hero">
+    <div>
+        <h1>Hi, @Model.FirstName &#x1F44B;</h1>
+        <p class="muted">
+            Today is <strong>@Constants.WeekdayNames[Model.TodayIndex]</strong> &middot;
+            @if (Model.TodaySchedule is { IsWorking: true, StartTime: { } start, EndTime: { } end })
+            {
+                <text>scheduled <strong>@start.ToString("HH:mm")&ndash;@end.ToString("HH:mm")</strong> (@Model.TodaySchedule.Hours h)</text>
+            }
+            else
+            {
+                <span class="muted">no shift scheduled</span>
+            }
+        </p>
+        @if (Model.BusinessUnits.Count > 0)
+        {
+            <p class="muted" style="margin-top:4px;font-size:0.9rem;">
+                Business Unit:
+                @foreach (var bu in Model.BusinessUnits)
+                {
+                    <span class="badge badge-info" style="margin-right:4px;">@bu</span>
+                }
+            </p>
+        }
+    </div>
+    <div class="hero-actions">
+        @if (Model.MyAttendance is { } att && att.IsOpen)
+        {
+            <form method="post" asp-controller="Attendance" asp-action="CheckOut" class="inline">
+                @Html.AntiForgeryToken()
+                <button type="submit" class="btn btn-warn">
+                    Check out
+                </button>
+            </form>
+            @* Break / Start lunch sit next to Check out so the active-day
+               action group is in one place. Both buttons reuse the
+               existing IDs the heartbeat / break / lunch handlers in
+               app.js already look up. *@
+            <button type="button" class="btn btn-action btn-break" id="break-toggle"
+                    data-break-start-label="☕ Break"
+                    data-break-end-label="End break"
+                    data-break-max="@AttendanceMonitoring.Models.Constants.MaxShortBreaksPerDay"
+                    title="Take a 15-minute break (up to 2 per day). Pauses offline alerts.">
+                ☕ Break
+            </button>
+            <button type="button" class="btn btn-action btn-lunch" id="lunch-toggle"
+                    data-lunch-start-label="🍽 Start lunch"
+                    data-lunch-end-label="End lunch"
+                    data-lunch-max="@AttendanceMonitoring.Models.Constants.MaxLunchesPerDay"
+                    title="Pause offline alerts for 1 hour. Only 1 lunch break per day.">
+                🍽 Start lunch
+            </button>
+            <span class="muted">Checked in at @UserClock.Format(Model.Me, att.CheckIn, "HH:mm") @UserClock.Label(Model.Me)</span>
+            @if (Model.MyLate is { Status: LateCheck.LateStatus.Late } late)
+            {
+                var h = late.LateMinutes / 60;
+                var m = late.LateMinutes % 60;
+                var lbl = h > 0 ? $"Late {h:D2}:{m:D2}" : $"Late {m} min";
+                <span class="badge badge-active"
+                      style="margin-left:6px;"
+                      title="@late.WorkType, grace @late.GraceMinutes min">@lbl</span>
+            }
+            else if (Model.MyLate is { Status: LateCheck.LateStatus.OnTime })
+            {
+                <span class="badge badge-done"
+                      style="margin-left:6px;"
+                      title="@Model.MyLate.WorkType, grace @Model.MyLate.GraceMinutes min">On time</span>
+            }
+        }
+        else if (Model.MyAttendance is { } closed)
+        {
+            <span class="badge badge-done">
+                Completed today &middot; @PhTime.FormatDurationMinutes(closed.DurationMinutes)
+            </span>
+            <span class="muted" style="margin-left:6px;">
+                Checked in at @UserClock.Format(Model.Me, closed.CheckIn, "HH:mm") @UserClock.Label(Model.Me)
+                @if (closed.CheckOut is { } checkOut)
+                {
+                    <text>&middot; Checked out at @UserClock.Format(Model.Me, checkOut, "HH:mm") @UserClock.Label(Model.Me)</text>
+                }
+            </span>
+            @if (Model.Me?.IsSupport == true)
+            {
+                <form method="post" asp-controller="Attendance" asp-action="CheckIn"
+                      class="inline selfie-form" style="margin-left:8px;">
+                    @Html.AntiForgeryToken()
+                    <input type="hidden" name="photo" value="" />
+                    <button type="button" class="btn btn-primary"
+                            data-selfie-trigger data-selfie-action="check-in"
+                            title="Start another support session">
+                        Check in again
+                    </button>
+                </form>
+            }
+            @if (Model.NextShiftEarlyStart is { } nextStart)
+            {
+                @* Cross-midnight back-to-back: today's shift is closed but the
+                   user's next scheduled shift starts within the pre-shift
+                   grace window. Surface a second Check-in button so they can
+                   clock in early for the upcoming shift. *@
+                <form method="post" asp-controller="Attendance" asp-action="CheckIn"
+                      class="inline selfie-form" style="margin-left:8px;">
+                    @Html.AntiForgeryToken()
+                    <input type="hidden" name="photo" value="" />
+                    <button type="button" class="btn btn-primary"
+                            data-selfie-trigger data-selfie-action="check-in"
+                            title="Clock in early for your next shift">
+                        Check in for next shift
+                    </button>
+                </form>
+                <span class="muted" style="margin-left:6px;">
+                    Next shift @nextStart.ToString("HH:mm") @UserClock.Label(Model.Me)
+                </span>
+            }
+        }
+        else
+        {
+            <form method="post" asp-controller="Attendance" asp-action="CheckIn" class="inline selfie-form">
+                @Html.AntiForgeryToken()
+                <input type="hidden" name="photo" value="" />
+                <select name="activity_tag" class="activity-tag-select" title="What will you focus on first?">
+                    <option value="">— Activity tag (optional) —</option>
+                    @foreach (var tag in AttendanceMonitoring.Models.Constants.ActivityTags)
+                    {
+                        <option value="@tag">@tag</option>
+                    }
+                </select>
+                <button type="button" class="btn btn-primary"
+                        data-selfie-trigger data-selfie-action="check-in">
+                    Check in
+                </button>
+            </form>
+            @if (TempData["AllowForceClockIn"] as string == "1")
+            {
+                @* The previous attempt was blocked because the user is not yet
+                   on schedule. Surface a one-shot override so they can still
+                   clock in early if it's genuinely needed — the schedule
+                   variance will be flagged in the daily report. *@
+                <form method="post" asp-controller="Attendance" asp-action="CheckIn" class="inline selfie-form" style="margin-left:8px;">
+                    @Html.AntiForgeryToken()
+                    <input type="hidden" name="photo" value="" />
+                    <input type="hidden" name="force" value="true" />
+                    <button type="button" class="btn btn-ghost"
+                            data-selfie-trigger data-selfie-action="check-in"
+                            title="Clock in anyway, ignoring your schedule">
+                        Clock in early anyway
+                    </button>
+                </form>
+            }
+        }
+    </div>
+</section>
+
+@if (Model.MyAttendance is { IsOpen: true })
+{
+    @* Quota-reset request entry point. The break / lunch buttons disable
+       themselves once the daily cap is hit; this little panel lets the
+       employee ask an admin to clear the counter so they can take
+       another one. The request goes into the admin Requests queue. *@
+    <details class="quota-reset-panel" style="margin:12px 0;padding:10px 14px;border:1px solid var(--border, #e0e0e0);border-radius:8px;background:var(--card-bg, #fff);">
+        <summary style="cursor:pointer;font-weight:600;">
+            Need another break or lunch? Request a reset
+        </summary>
+        <p class="muted" style="margin-top:8px;font-size:0.9rem;">
+            A Project Manager / Program Manager will review your request.
+            If approved, your counter for today is reset so you can take
+            another one. Add a short note explaining why.
+        </p>
+        <div style="display:flex;gap:14px;flex-wrap:wrap;">
+            <form method="post"
+                  asp-controller="Dashboard" asp-action="RequestQuotaReset"
+                  style="flex:1 1 240px;min-width:240px;">
+                @Html.AntiForgeryToken()
+                <input type="hidden" name="kind" value="break" />
+                <label class="muted" style="font-size:0.85rem;">Reason (break)</label>
+                <input type="text" name="reason" maxlength="500"
+                       placeholder="e.g. need to take medication"
+                       class="note-input" style="width:100%;margin:4px 0 6px;" />
+                <button type="submit" class="btn btn-action btn-break btn-sm">
+                    Request break reset
+                </button>
+            </form>
+            <form method="post"
+                  asp-controller="Dashboard" asp-action="RequestQuotaReset"
+                  style="flex:1 1 240px;min-width:240px;">
+                @Html.AntiForgeryToken()
+                <input type="hidden" name="kind" value="lunch" />
+                <label class="muted" style="font-size:0.85rem;">Reason (lunch)</label>
+                <input type="text" name="reason" maxlength="500"
+                       placeholder="e.g. meeting ran into my lunch"
+                       class="note-input" style="width:100%;margin:4px 0 6px;" />
+                <button type="submit" class="btn btn-action btn-lunch btn-sm">
+                    Request lunch reset
+                </button>
+            </form>
+        </div>
+    </details>
+}
+
+<section class="kpis">
+    <div class="kpi kpi-online" id="self-state-card">
+        <div class="kpi-label">My status</div>
+        <div class="kpi-value" style="display:flex;align-items:center;gap:10px;">
+            <span class="dot dot-online" id="self-state-dot"></span>
+            <span id="self-state-label">Online</span>
+        </div>
+        <div class="kpi-sub muted" id="self-state-sub" style="margin-top:4px;font-size:0.85rem;"></div>
+    </div>
+    <div class="kpi kpi-present">
+        <div class="kpi-label">Today's plan</div>
+        <div class="kpi-value">
+            @if (Model.TodaySchedule is { IsWorking: true, StartTime: { } s, EndTime: { } e })
+            {
+                @($"{s:HH\\:mm}\u2013{e:HH\\:mm}")
+            }
+            else
+            {
+                <span class="muted">Off</span>
+            }
+        </div>
+    </div>
+    <div class="kpi kpi-total">
+        <div class="kpi-label">Working days / week</div>
+        <div class="kpi-value">@Model.WorkingDays</div>
+    </div>
+    <div class="kpi kpi-offline">
+        <div class="kpi-label">Scheduled hours / week</div>
+        <div class="kpi-value">@Model.WeeklyHours</div>
+    </div>
+</section>
+
+<section class="card">
+    <div class="card-header">
+        <h2>This week</h2>
+        <small class="muted">Week of @Model.WeekStart.ToString("MMM d, yyyy") &middot; set by your administrator.</small>
+    </div>
+    <div class="schedule-grid">
+        @foreach (var entry in Model.Schedule)
+        {
+            var classes = new List<string> { "schedule-day" };
+            if (entry.WorkDate == PhTime.Today) classes.Add("is-today");
+            if (!entry.IsWorking) classes.Add("is-off");
+            Model.WeekHolidays.TryGetValue(entry.WorkDate, out var holiday);
+            <div class="@string.Join(' ', classes)">
+                <div class="schedule-day-name">@entry.WorkDate.ToString("ddd, MMM d")</div>
+                @if (entry.IsWorking
+                     && entry.StartTime is { } st
+                     && entry.EndTime is { } et)
+                {
+                    <div class="schedule-day-time">
+                        @st.ToString("HH:mm") &ndash; @et.ToString("HH:mm")
+                    </div>
+                    <div class="schedule-day-hours muted">@entry.Hours h</div>
+                    <div class="schedule-day-note">@entry.EffectiveWorkType</div>
+                }
+                else
+                {
+                    var nonWorkingLabel = entry.EffectiveWorkType;
+                    if (string.Equals(nonWorkingLabel, "Dayoff", StringComparison.OrdinalIgnoreCase))
+                    {
+                        nonWorkingLabel = "Day off";
+                    }
+                    <div class="schedule-day-time muted">@nonWorkingLabel</div>
+                }
+                @if (holiday is not null)
+                {
+                    <div class="schedule-day-note">
+                        <span class="badge badge-warn">Holiday</span> @holiday.Name
+                    </div>
+                }
+            </div>
+        }
+    </div>
+</section>
+
+<section class="card">
+    <div class="card-header">
+        <h2>Recent attendance</h2>
+        <a asp-controller="Attendance" asp-action="Index" class="muted">View all &rarr;</a>
+    </div>
+    <div class="table-wrap">
+        <table class="data-table sortable">
+            <thead>
+                <tr>
+                    <th data-sort-type="date">Date</th>
+                    <th>Day</th>
+                    <th>Check-in</th>
+                    <th>Check-out</th>
+                    <th data-sort-type="num">Hours Rendered</th>
+                </tr>
+            </thead>
+            <tbody>
+                @if (Model.Recent.Count == 0)
+                {
+                    <tr>
+                        <td colspan="5" class="muted">
+                            No attendance records yet — check in above to get started.
+                        </td>
+                    </tr>
+                }
+                else
+                {
+                    foreach (var r in Model.Recent)
+                    {
+                        var wdIdx = ((int)r.WorkDate.DayOfWeek + 6) % 7;
+                        <tr>
+                            <td data-sort="@r.WorkDate.ToString("yyyy-MM-dd")">@r.WorkDate.ToString("yyyy-MM-dd")</td>
+                            <td>@Constants.WeekdayNames[wdIdx]</td>
+                            <td>@UserClock.Format(viewer, r.CheckIn, "HH:mm")</td>
+                            <td>
+                                @if (r.CheckOut is not null)
+                                {
+                                    @UserClock.Format(viewer, r.CheckOut, "HH:mm")
+                                }
+                                else
+                                {
+                                    <span class="muted">—</span>
+                                }
+                            </td>
+                            <td data-sort="@r.DurationMinutes">
+                                @if (r.CheckOut is not null)
+                                {
+                                    @PhTime.FormatDurationMinutes(r.DurationMinutes)
+                                }
+                                else
+                                {
+                                    <span class="badge badge-active">in progress</span>
+                                }
+                            </td>
+                        </tr>
+                    }
+                }
+            </tbody>
+        </table>
+        @if (Model.Recent.Count > 0)
+        {
+            var completedCount = Model.Recent.Count(r => r.CheckOut is not null);
+            <p class="muted" style="margin-top:10px;">
+                Total of last @completedCount completed entries:
+                <strong>@PhTime.FormatDurationLong(Model.RecentMinutes)</strong>
+            </p>
+        }
+    </div>
+</section>

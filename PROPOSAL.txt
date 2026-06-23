@@ -1,0 +1,296 @@
+================================================================================
+PROJECT PROPOSAL - ATTENDANCE MONITORING SYSTEM
+================================================================================
+
+Field             | Value
+------------------+--------------------------------------------------
+Project name      | Attendance Monitoring System
+Document version  | 1.0
+Date              | May 6, 2026
+Prepared by       | Jerosamie / BU2
+Status            | Draft for stakeholder review
+
+--------------------------------------------------------------------------------
+1. EXECUTIVE SUMMARY
+--------------------------------------------------------------------------------
+
+The Attendance Monitoring System is an internal web application that
+replaces the current Microsoft Forms-based "Offsite Attendance Records"
+process with a faster, automated, and auditable solution. Employees clock
+in and out from a single dashboard; managers see live presence and daily
+attendance in real time. The application is built with a lightweight
+ASP.NET Core 8 MVC + SQLite stack, runs on commodity hardware, and can be
+deployed to a single internal server in under an hour.
+
+Headline benefits:
+
+  - Reduces daily attendance friction from ~6 form clicks to 1 click.
+  - Eliminates duplicate / mistimed records - server timestamps are
+    authoritative and use Philippine Standard Time (PHT, UTC+8).
+  - Gives managers a live "who is online now" view that the existing MS
+    Forms workflow cannot offer.
+  - Provides a foundation for future HR-related features (overtime,
+    schedule management, exception reports).
+
+
+--------------------------------------------------------------------------------
+2. BACKGROUND AND PROBLEM STATEMENT
+--------------------------------------------------------------------------------
+
+Today the team relies on Offsite Attendance Records_2026 (Microsoft
+Forms) for daily clock-in / clock-out events. While simple, it has known
+pain points:
+
+Pain point                                                   | Impact
+-------------------------------------------------------------+--------------------------------------------------------
+Employees re-type Employee ID, email, name every clock event | Friction; errors; ~30s per submit x 2 x N people / day
+No real-time visibility for managers                         | Hard to confirm staff are actively working offsite
+Forms responses live in a single Excel sheet, hard to query  | Slow reporting; manual roll-ups
+URL pre-fill is disabled at the tenant level                 | Cannot be auto-filled even with carefully crafted links
+No notion of a working schedule per employee                 | Late-ins / no-shows are not flagged automatically
+
+Our prototype shows that a small in-house tool can address all of these
+without losing the data that the existing Excel workbook captures.
+
+
+--------------------------------------------------------------------------------
+3. GOALS AND NON-GOALS
+--------------------------------------------------------------------------------
+
+3.1 Goals
+
+  1. One-click check-in / check-out for every employee.
+  2. Live presence dashboard for admins (refreshes every 15 seconds).
+  3. Per-employee weekly schedule defaulted to offsite Tue-Thu 09:00-17:00
+     (Mon, Fri, and weekends are deactivated).
+  4. Attendance history per employee, exportable to Excel/CSV.
+  5. Role-based access control (Admin vs Employee).
+  6. All times shown in Philippine Standard Time while stored in UTC.
+
+3.2 Non-goals (this phase)
+
+  - Payroll calculation, leave management, or HRIS integration.
+  - Mobile native apps (the responsive web UI is sufficient).
+  - Geo-fenced offsite verification (can be added later via heartbeat
+    metadata).
+
+
+--------------------------------------------------------------------------------
+4. PROPOSED SOLUTION
+--------------------------------------------------------------------------------
+
+A self-hosted ASP.NET Core web application with three primary surfaces:
+
+  1. Employee dashboard - personal status, today's schedule, weekly grid,
+     recent attendance, large Check-in / Clock-out buttons.
+  2. Admin dashboard - KPI tiles (online / offline / present today /
+     total users), live team table with status, today's record, and
+     last-seen timestamp.
+  3. Schedule editor - Mon-Sun grid with working/off toggle, start/end
+     times, and free-text note. Admins can edit any user's schedule.
+
+A heartbeat ping (POST /api/heartbeat) every 20 seconds while the tab is
+open keeps users.last_seen fresh; a user is "online" if seen within the
+last 60 seconds.
+
+
+4.1 High-level architecture
+
+    +-----------+   HTTPS   +-----------------------------+   SQLite file
+    |  Browser  |<--------->|  ASP.NET Core (Kestrel/IIS) |--------------> attendance.db
+    +-----------+           |  - Cookie auth              |
+                            |  - EF Core ORM              |
+                            |  - JSON status / heartbeat  |
+                            +-----------------------------+
+
+Optional: replace SQLite with PostgreSQL (one config change:
+ConnectionStrings:DefaultConnection) when the user count exceeds ~50
+active responders.
+
+
+4.2 Technology choices
+
+Concern        | Choice                          | Why
+---------------+---------------------------------+------------------------------------------
+Web framework  | ASP.NET Core 8 MVC              | First-class Windows + Linux + IIS support
+ORM / DB       | EF Core 8 + SQLite (dev) /      | Zero-ops at small scale; Postgres-ready
+               | PostgreSQL (production option)  |
+Auth           | Cookie auth + PBKDF2-SHA256     | Battle-tested; no plaintext passwords
+UI             | Razor views + vanilla JS        | No build pipeline; auditable
+Time handling  | UTC storage + PHT display       | Avoids DST/locale bugs
+Excel export   | ClosedXML                       | Native .xlsx, no Office install required
+Deployment     | Single Kestrel process / IIS    | Runs anywhere .NET 8 runtime is available
+
+
+--------------------------------------------------------------------------------
+5. FUNCTIONAL REQUIREMENTS
+--------------------------------------------------------------------------------
+
+5.1 Authentication & users
+  - Username/password login with hashed credentials.
+  - Roles: admin and employee.
+  - Admin-only "Add user" page captures Employee ID (E + 6-7 digits),
+    full name, email, role, temporary password.
+
+5.2 Attendance
+  - One open record per user per day (PHT date).
+  - POST /check-in opens a record; POST /check-out closes it.
+  - Auto check-out on logout if a record is still open.
+  - Duration computed in minutes when both timestamps exist.
+
+5.3 Schedule
+  - 7 rows per user, Monday -> Sunday.
+  - Defaults reflect the team's offsite cadence:
+      Tue / Wed / Thu -> working, 09:00-17:00, note "Offsite".
+      Mon / Fri / Sat / Sun -> deactivated (off).
+  - Admins can edit any user's schedule via ?user_id=.
+
+5.4 Live status
+  - 15-second auto-refresh of /api/status (admin dashboard).
+  - 20-second heartbeat from authenticated tabs.
+  - Presence pill on the top bar shows current user's online dot.
+
+
+--------------------------------------------------------------------------------
+6. NON-FUNCTIONAL REQUIREMENTS
+--------------------------------------------------------------------------------
+
+Area          | Target
+--------------+----------------------------------------------------------------
+Availability  | Business hours, >= 99% (single-server is acceptable in v1)
+Performance   | Dashboard p95 < 500 ms on 100 active users / 1k records / day
+Security      | OWASP Top-10 hygiene; CSRF token on POSTs; PBKDF2 hash
+Privacy       | Minimal PII (name, email, employee ID, attendance times)
+Auditability  | All check-ins/outs are immutable rows
+Backup        | Nightly file copy (SQLite) or pg_dump (PostgreSQL)
+
+
+--------------------------------------------------------------------------------
+7. SECURITY & COMPLIANCE
+--------------------------------------------------------------------------------
+
+  - Passwords stored as PBKDF2-SHA256 (260,000 iterations, 16-byte salt,
+    32-byte hash).
+  - Session cookies use HttpOnly + Secure (when behind HTTPS).
+  - No external scripts or trackers - all assets are local.
+  - PII boundary is the SQLite/Postgres database only. Backups should be
+    encrypted at rest.
+  - Production must run behind HTTPS (corporate reverse proxy or
+    IIS/nginx termination).
+
+
+--------------------------------------------------------------------------------
+8. MIGRATION & ROLLOUT PLAN
+--------------------------------------------------------------------------------
+
+Phase | Duration | Activities
+------+----------+----------------------------------------------------------------
+  0   | 1 week   | Stakeholder sign-off on this proposal; pick host (VM / IIS)
+  1   | 1 week   | Pilot with 1 team (<= 10 employees) on staging instance
+  2   | 2 weeks  | Tune schedules, add reports, write CSV export for HR
+  3   | 1 week   | Cut over: disable MS Forms link, redirect employees to new app
+  4   | Ongoing  | Bug-fix / feature backlog managed in GitHub Issues
+
+Historical MS Forms data will be imported once via CSV -> attendance
+rows so the new app shows continuity from day 1.
+
+
+--------------------------------------------------------------------------------
+9. RISKS & MITIGATIONS
+--------------------------------------------------------------------------------
+
+Risk                                             | Likelihood | Impact | Mitigation
+-------------------------------------------------+------------+--------+------------------------------------------------------------------
+User adoption - change fatigue                   | Medium     | Medium | Mirror MS Forms fields exactly; 1-page training doc
+Single-server outage                             | Low        | High   | Host on monitored VM; nightly DB backups; runbook for restart
+Time-zone confusion (UTC vs PHT)                 | Low        | Medium | All UI shows "PHT"; DB rows stored in UTC; tests cover boundary
+Scope creep (payroll, leaves)                    | High       | Medium | Non-goals section above; tracked separately
+Employee logs in from multiple tabs / devices    | Medium     | Low    | Heartbeat uses last write wins; one open record per (user, date)
+
+
+--------------------------------------------------------------------------------
+10. COST & RESOURCE ESTIMATE
+--------------------------------------------------------------------------------
+
+Item                                    | Estimate
+----------------------------------------+------------------------------------------------------
+Engineering (build + harden + reports)  | ~4 person-weeks (1 dev)
+Infrastructure                          | 1 small VM (2 vCPU / 4 GB RAM) or existing IIS host
+External licenses                       | None - all libraries are open source (MIT/Apache)
+Recurring                               | Backup storage; optional PostgreSQL managed instance
+
+No SaaS fees. No third-party data processors.
+
+
+--------------------------------------------------------------------------------
+11. SUCCESS METRICS
+--------------------------------------------------------------------------------
+
+Measured 30 days after rollout vs. the MS Forms baseline:
+
+  1. Average time to clock in/out drops from ~30 s to < 5 s.
+  2. Attendance completeness (records expected vs. submitted) rises to
+     >= 99% (vs. ~92% today).
+  3. Manager satisfaction survey >= 4 / 5 on "Can I tell who is working
+     right now?".
+  4. Zero reported password / data incidents.
+
+
+--------------------------------------------------------------------------------
+12. FUTURE ROADMAP (POST-MVP)
+--------------------------------------------------------------------------------
+
+  - Manager-approved adjustments (forgot to clock out, etc.).
+  - Public holiday calendar applied to schedules.
+  - Shift swaps and time-off requests.
+  - Slack / Teams notifications for late check-ins.
+  - Active Directory / Microsoft Entra SSO.
+  - REST API for HR systems and payroll exports.
+
+
+--------------------------------------------------------------------------------
+13. APPENDIX A - CURRENT BUILD SNAPSHOT
+--------------------------------------------------------------------------------
+
+Repository: C:\Code\Attendance_Monitoring
+
+    Program.cs                  ASP.NET Core entry point, DI, auth setup
+    AttendanceMonitoring.csproj net8.0 project file (EF Core + ClosedXML)
+    Controllers/                MVC controllers (Account, Dashboard, Attendance,
+                                Schedule, Users, Api)
+    Models/                     EF Core entities (User, Attendance, ScheduleEntry)
+    Data/AppDbContext.cs        DbContext + table mappings
+    Services/                   PhTime, PasswordHasher
+    Views/                      Razor views (dashboards, schedule, login, etc.)
+    wwwroot/css/style.css       Dashboard styling (CSI Interfusion brand)
+    wwwroot/js/app.js           Heartbeat + live refresh (PHT formatted)
+    wwwroot/images/             Brand SVG logos
+
+Default seeded users (created on first run):
+
+Role     | Username | Password     | Employee ID
+---------+----------+--------------+-------------
+Admin    | admin    | Admin123!    | -
+Employee | jdoe     | Password123! | E000001
+
+Run locally:
+
+    cd C:\Code\Attendance_Monitoring
+    dotnet run --project .\AttendanceMonitoring.csproj --urls "http://127.0.0.1:5000"
+    # open http://127.0.0.1:5000
+
+
+--------------------------------------------------------------------------------
+14. APPROVAL
+--------------------------------------------------------------------------------
+
+Role             | Name | Signature | Date
+-----------------+------+-----------+------
+Project sponsor  |      |           |
+Engineering lead |      |           |
+HR / People ops  |      |           |
+Information sec. |      |           |
+
+================================================================================
+END OF DOCUMENT
+================================================================================

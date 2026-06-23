@@ -1,0 +1,54 @@
+@*
+    Sub-tab strip used by the admin "Requests" feature group. Render it
+    just under the page hero so admins can switch between
+    Attendance edit reviews, Leave-of-absence approvals, Shift-change
+    amendments, and Break/Lunch reset requests.
+
+    Usage:
+        @await Html.PartialAsync("_RequestsTabs", ("edits",  pendingEdit, pendingLeave, pendingShift, pendingQuota))
+        @await Html.PartialAsync("_RequestsTabs", ("leaves", pendingEdit, pendingLeave, pendingShift, pendingQuota))
+        @await Html.PartialAsync("_RequestsTabs", ("shifts", pendingEdit, pendingLeave, pendingShift, pendingQuota))
+        @await Html.PartialAsync("_RequestsTabs", ("quota",  pendingEdit, pendingLeave, pendingShift, pendingQuota))
+*@
+@model (string Active, int PendingEdit, int PendingLeave, int PendingShift, int PendingQuota)
+@{
+    string Cls(string key) => Model.Active == key ? "subtab subtab-active" : "subtab";
+}
+<nav class="subtabs" aria-label="Requests sub-navigation">
+    <a class="@Cls("edits")"
+       asp-controller="Attendance"
+       asp-action="EditRequests">
+        <span>Attendance edits</span>
+        @if (Model.PendingEdit > 0)
+        {
+            <span class="subtab-badge" title="@Model.PendingEdit pending">@Model.PendingEdit</span>
+        }
+    </a>
+    <a class="@Cls("leaves")"
+       asp-controller="Leave"
+       asp-action="Index">
+        <span>Leave of absence</span>
+        @if (Model.PendingLeave > 0)
+        {
+            <span class="subtab-badge" title="@Model.PendingLeave pending">@Model.PendingLeave</span>
+        }
+    </a>
+    <a class="@Cls("shifts")"
+       asp-controller="Schedule"
+       asp-action="Amendments">
+        <span>Shift changes</span>
+        @if (Model.PendingShift > 0)
+        {
+            <span class="subtab-badge" title="@Model.PendingShift pending">@Model.PendingShift</span>
+        }
+    </a>
+    <a class="@Cls("quota")"
+       asp-controller="QuotaReset"
+       asp-action="Index">
+        <span>Break / lunch resets</span>
+        @if (Model.PendingQuota > 0)
+        {
+            <span class="subtab-badge" title="@Model.PendingQuota pending">@Model.PendingQuota</span>
+        }
+    </a>
+</nav>

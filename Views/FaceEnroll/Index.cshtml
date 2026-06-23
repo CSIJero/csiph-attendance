@@ -1,0 +1,143 @@
+@model AttendanceMonitoring.ViewModels.FaceEnrollVm
+@{
+    ViewData["Title"] = "Face profile";
+}
+
+<section class="hero">
+    <div>
+        <h1>Face profile</h1>
+        <p class="muted">
+            Enroll a single reference selfie. Every subsequent check-in
+            selfie is compared against this reference using a perceptual
+            hash (a "fingerprint" of the image). Mismatches do not block
+            check-ins — they are logged so administrators can investigate.
+        </p>
+        <p class="muted">
+            We do <strong>not</strong> store your face image or any
+            biometric template that can be reversed back to a photo. The
+            stored value is a 64-bit number derived from the 8&times;8
+            greyscale thumbnail of your reference photo.
+        </p>
+    </div>
+</section>
+
+<section class="card">
+    @if (Model.IsEnrolled)
+    {
+        <p>
+            <span class="pill pill-ok">Enrolled</span>
+            <small class="muted">since @Model.EnrolledAt?.ToLocalTime().ToString("yyyy-MM-dd HH:mm")</small>
+        </p>
+    }
+    else
+    {
+        <p>
+            <span class="pill pill-off">Not enrolled</span>
+            <small class="muted">Pick a past selfie below or capture a new photo.</small>
+        </p>
+    }
+</section>
+
+@if (Model.RecentSelfies.Count > 0)
+{
+    <section class="card">
+        <div class="card-header">
+            <h2>Enroll from a past check-in</h2>
+            <small class="muted">@Model.RecentSelfies.Count most recent</small>
+        </div>
+        <p class="muted">
+            Pick the photo that looks closest to how you usually appear
+            at the camera. The selected image becomes the reference for
+            all future check-in comparisons.
+        </p>
+        <div class="face-grid"
+             style="display:grid; grid-template-columns:repeat(auto-fill, minmax(140px, 1fr)); gap:12px; margin-top:8px;">
+            @foreach (var item in Model.RecentSelfies)
+            {
+                <form method="post" asp-action="EnrollFromHistory" class="face-tile"
+                      style="display:flex; flex-direction:column; align-items:stretch; gap:6px;
+                             border:1px solid var(--border,#ccc); border-radius:8px; padding:8px;">
+                    @Html.AntiForgeryToken()
+                    <input type="hidden" name="attendanceId" value="@item.AttendanceId" />
+                    <img src="@item.Photo" alt="Check-in selfie @item.WorkDate"
+                         style="width:100%; aspect-ratio:1/1; object-fit:cover; border-radius:6px;" />
+                    <div style="display:flex; flex-direction:column; gap:2px;">
+                        <strong style="font-size:0.85rem;">@item.WorkDate.ToString("yyyy-MM-dd")</strong>
+                        <small class="muted">@item.CheckIn.ToLocalTime().ToString("HH:mm")</small>
+                        @if (!string.IsNullOrEmpty(item.FaceMatchStatus))
+                        {
+                            var pillClass = item.FaceMatchStatus switch
+                            {
+                                "Match" => "pill-ok",
+                                "AutoEnrolled" => "pill-ok",
+                                "Mismatch" => "pill-warn",
+                                _ => "pill-info",
+                            };
+                            <span class="pill @pillClass" style="font-size:0.7rem;">@item.FaceMatchStatus</span>
+                        }
+                    </div>
+                    <button type="submit" class="btn btn-sm btn-primary"
+                            onclick="return confirm('Use this selfie as your reference?');">
+                        Use this photo
+                    </button>
+                </form>
+            }
+        </div>
+    </section>
+}
+else
+{
+    <section class="card">
+        <p class="muted">
+            No past check-in selfies on file yet. Either complete one
+            check-in (it will auto-enroll the first time) or capture a
+            fresh reference photo below.
+        </p>
+    </section>
+}
+
+<section class="card">
+    <h2>Or capture a new reference photo</h2>
+    <video id="face-video" autoplay playsinline muted style="width:100%; max-width:360px; background:#000; border-radius:8px;"></video>
+    <canvas id="face-canvas" width="320" height="240" style="display:none;"></canvas>
+    <div id="face-preview" style="margin-top:1em;"></div>
+
+    <form method="post" asp-action="Enroll" id="face-form" class="form">
+        @Html.AntiForgeryToken()
+        <input type="hidden" name="photo" id="face-photo" />
+        <div class="form-actions">
+            <button type="button" class="btn" id="face-capture">Capture photo</button>
+            <button type="submit" class="btn btn-primary" id="face-submit" disabled>Save as reference</button>
+            @if (Model.IsEnrolled)
+            {
+                <button type="submit" class="btn btn-danger" formaction="@Url.Action("Clear")">Clear enrollment</button>
+            }
+        </div>
+    </form>
+</section>
+
+<script>
+    (function () {
+        var video = document.getElementById('face-video');
+        var canvas = document.getElementById('face-canvas');
+        var preview = document.getElementById('face-preview');
+        var photoInput = document.getElementById('face-photo');
+        var submitBtn = document.getElementById('face-submit');
+
+        navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user' }, audio: false })
+            .then(function (stream) { video.srcObject = stream; })
+            .catch(function (err) {
+                preview.innerHTML = '<p class="muted">Camera unavailable: ' + err.message + '</p>';
+            });
+
+        document.getElementById('face-capture').addEventListener('click', function () {
+            canvas.width = video.videoWidth || 320;
+            canvas.height = video.videoHeight || 240;
+            canvas.getContext('2d').drawImage(video, 0, 0, canvas.width, canvas.height);
+            var data = canvas.toDataURL('image/jpeg', 0.85);
+            photoInput.value = data;
+            preview.innerHTML = '<img src="' + data + '" alt="Captured preview" style="max-width:200px; border-radius:8px;" />';
+            submitBtn.disabled = false;
+        });
+    })();
+</script>

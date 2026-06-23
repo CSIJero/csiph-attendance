@@ -1,0 +1,357 @@
+@model DailyReportViewModel
+@{
+    ViewData["Title"] = "Daily Report";
+    var viewer = ViewData["ViewerUser"] as User;
+}
+
+@await Html.PartialAsync("_ReportTabs", "daily")
+
+<section class="hero">
+    <div>
+        <h1>Daily Attendance Report</h1>
+        <p class="muted">
+            One row per team member per workday. Hours rendered, attendance status,
+            violations and time-difference vs. schedule are computed automatically.
+            <strong>@Model.Rows.Count</strong> rows for
+            <strong>@Model.StartDate.ToString("MMM d")</strong> &ndash;
+            <strong>@Model.EndDate.ToString("MMM d, yyyy")</strong>.
+        </p>
+    </div>
+    <div class="hero-actions">
+        <a class="btn btn-secondary"
+           data-confirm="Extract the Daily Attendance report to Excel? The file will be generated using the filters currently shown above."
+           href="@Url.Action("DailyXlsx", "Reports",
+                new {
+                    start = Model.StartDate.ToString("yyyy-MM-dd"),
+                    end = Model.EndDate.ToString("yyyy-MM-dd"),
+                    bu = Model.BusinessUnitFilter,
+                    user_id = Model.UserIdFilter,
+                    include_off = Model.IncludeNonWorkingDays
+                })">
+            Export to Excel
+        </a>
+    </div>
+</section>
+
+<section class="card">
+    <div class="card-header">
+        <h2>Filters</h2>
+    </div>
+    <form method="get" asp-controller="Reports" asp-action="Daily" class="modal-filters">
+        <label>
+            <span>Start</span>
+            <input type="date" name="start" value="@Model.StartDate.ToString("yyyy-MM-dd")" />
+        </label>
+        <label>
+            <span>End</span>
+            <input type="date" name="end" value="@Model.EndDate.ToString("yyyy-MM-dd")" />
+        </label>
+        <label>
+            <span>Business Unit</span>
+            <select name="bu">
+                <option value="" selected="@(string.IsNullOrEmpty(Model.BusinessUnitFilter))">All</option>
+                @foreach (var bu in Model.BusinessUnits)
+                {
+                    <option value="@bu" selected="@(Model.BusinessUnitFilter == bu)">@bu</option>
+                }
+            </select>
+        </label>
+        <label>
+            <span>Employee</span>
+            <select name="user_id">
+                <option value="" selected="@(Model.UserIdFilter is null)">All</option>
+                @foreach (var u in Model.Users)
+                {
+                    <option value="@u.Id" selected="@(Model.UserIdFilter == u.Id)">@u.FullName</option>
+                }
+            </select>
+        </label>
+        <label class="inline-label" style="align-items:center; gap:6px;">
+            <input type="checkbox" name="include_off" value="true"
+                   checked="@(Model.IncludeNonWorkingDays)" />
+            <span>Include non-working days</span>
+        </label>
+        <div class="modal-filter-actions">
+            <button type="submit" class="btn btn-primary">Apply</button>
+            <a class="btn btn-ghost" asp-controller="Reports" asp-action="Daily">Reset</a>
+        </div>
+    </form>
+</section>
+
+<section class="card">
+    <div class="card-header">
+        <h2>Rows</h2>
+        <small class="muted">
+            Email Notifications counts the offline-during-shift alerts sent
+            for that day. Click the count to view 30-minute and over-60-minute
+            offline timestamps. Remarks is an export-only column.
+        </small>
+    </div>
+    <div class="table-wrap">
+        <table class="data-table sortable">
+            <thead>
+                <tr>
+                    <th>Date</th>
+                    <th>Key</th>
+                    <th>Employee Name</th>
+                    <th>Employee ID</th>
+                    <th>Business Unit</th>
+                    <th>Start Time</th>
+                    <th>End Time</th>
+                    <th>Hours Rendered</th>
+                    <th>Attendance Status</th>
+                    <th>Late</th>
+                    <th>Email Notifications</th>
+                    <th>Time Difference</th>
+                </tr>
+            </thead>
+            <tbody>
+                @if (Model.Rows.Count == 0)
+                {
+                    <tr>
+                        <td colspan="11" class="muted">
+                            No rows for the selected filters.
+                        </td>
+                    </tr>
+                }
+                else
+                {
+                    foreach (var row in Model.Rows)
+                    {
+                        var statusBadge = row.AttendanceStatus switch
+                        {
+                            "Complete" => "badge badge-done",
+                            "Incomplete" => "badge badge-active",
+                            "Incomplete Hours" => "badge badge-active",
+                            "Absent" => "badge badge-active",
+                            "Onleave" => "badge badge-done",
+                            "Holiday" => "badge badge-warn",
+                            _ => "muted",
+                        };
+                        <tr>
+                            <td>@row.Date.ToString("yyyy-MM-dd")</td>
+                            <td><small class="muted">@row.Key</small></td>
+                            <td>@row.EmployeeName</td>
+                            <td>@row.EmployeeId</td>
+                            <td>@row.BusinessUnit</td>
+                            <td>
+                                @if (row.StartTime is not null) { @UserClock.Format(viewer, row.StartTime, "HH:mm") }
+                                else { <span class="muted">&mdash;</span> }
+                            </td>
+                            <td>
+                                @if (row.EndTime is not null) { @UserClock.Format(viewer, row.EndTime, "HH:mm") }
+                                else if (row.StartTime is not null) { <span class="badge badge-active">Working</span> }
+                                else { <span class="muted">&mdash;</span> }
+                            </td>
+                            <td>
+                                @if (row.HoursRendered > 0)
+                                {
+                                    @PhTime.FormatDurationMinutes((int)Math.Round(row.HoursRendered * 60))
+                                }
+                                else { <span class="muted">&mdash;</span> }
+                            </td>
+                            <td>
+                                @if (string.IsNullOrEmpty(row.AttendanceStatus))
+                                {
+                                    <span class="muted">&mdash;</span>
+                                }
+                                else
+                                {
+                                    <span class="@statusBadge">@row.AttendanceStatus</span>
+                                }
+                            </td>
+                            <td>
+                                @if (string.IsNullOrEmpty(row.LateStatus))
+                                {
+                                    <span class="muted">&mdash;</span>
+                                }
+                                else if (row.LateMinutes > 0)
+                                {
+                                    <span class="badge badge-active" title="@row.WorkType">@row.LateStatus</span>
+                                }
+                                else
+                                {
+                                    <span class="badge badge-done" title="@row.WorkType">@row.LateStatus</span>
+                                }
+                            </td>
+                            <td>
+                                @if (row.EmailNotifications > 0)
+                                {
+                                    <button type="button"
+                                            class="btn btn-ghost btn-sm js-notif-modal-open"
+                                            data-employee="@row.EmployeeName"
+                                            data-date="@row.Date.ToString("yyyy-MM-dd")"
+                                            data-count="@row.EmailNotifications"
+                                            data-30="@row.Notification30To60Details"
+                                            data-60="@row.NotificationOver60Details">
+                                        @row.EmailNotifications
+                                    </button>
+                                }
+                                else { <span class="muted">&mdash;</span> }
+                            </td>
+                            <td>
+                                @{
+                                    var diff = row.TimeDifference;
+                                    var diffMin = (int)Math.Round(diff * 60);
+                                    var diffClass = diffMin < 0 ? "danger" : (diffMin > 0 ? "" : "muted");
+                                }
+                                @if (diffMin == 0)
+                                {
+                                    <span class="muted">00:00</span>
+                                }
+                                else
+                                {
+                                    var abs = Math.Abs(diffMin);
+                                    var hh = abs / 60;
+                                    var mm = abs % 60;
+                                    var sign = diffMin > 0 ? "+" : "-";
+                                    <span class="@diffClass">@($"{sign}{hh:D2}:{mm:D2}")</span>
+                                }
+                            </td>
+                        </tr>
+                    }
+                }
+            </tbody>
+        </table>
+    </div>
+</section>
+
+<div id="notif-modal" class="deploy-modal" role="dialog" aria-modal="true" aria-labelledby="notif-modal-title" hidden>
+    <div class="deploy-modal-inner" style="max-width:640px; text-align:left;">
+        <div style="display:flex; justify-content:flex-end;">
+            <button type="button" class="btn btn-ghost btn-sm js-notif-modal-close" aria-label="Close details">x</button>
+        </div>
+        <h2 id="notif-modal-title">Email Notification Details</h2>
+        <p id="notif-modal-subtitle" class="muted"></p>
+        <div class="table-wrap">
+            <table class="data-table" id="notif-modal-table">
+                <thead>
+                    <tr>
+                        <th>Time</th>
+                        <th>30 min. Offline</th>
+                        <th>Morethan 1hr offline</th>
+                    </tr>
+                </thead>
+                <tbody id="notif-modal-body">
+                    <tr>
+                        <td colspan="3" class="muted">No notification details.</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+        <div style="margin-top:14px; display:flex; justify-content:flex-end;">
+            <button type="button" class="btn btn-primary btn-sm js-notif-modal-close">Close</button>
+        </div>
+    </div>
+</div>
+
+<script>
+    (function () {
+        'use strict';
+        var modal = document.getElementById('notif-modal');
+        if (!modal) return;
+
+        var title = document.getElementById('notif-modal-title');
+        var subtitle = document.getElementById('notif-modal-subtitle');
+        var body = document.getElementById('notif-modal-body');
+        var closeButtons = document.querySelectorAll('.js-notif-modal-close');
+
+        function parseLines(raw) {
+            if (!raw) return [];
+            return raw.split(/\n+/).map(function (line) {
+                var t = line.trim();
+                if (!t) return null;
+                var m = t.match(/^(\d{2}:\d{2})\s*\((\d+)\s*min\)$/i);
+                if (!m) return { time: t, mins: null };
+                return { time: m[1], mins: parseInt(m[2], 10) };
+            }).filter(Boolean);
+        }
+
+        function formatMinutesAsHhMm(mins) {
+            if (typeof mins !== 'number' || isNaN(mins) || mins < 0) return '\u2014';
+            var hh = Math.floor(mins / 60);
+            var mm = mins % 60;
+            var hhText = hh < 10 ? '0' + hh : String(hh);
+            var mmText = mm < 10 ? '0' + mm : String(mm);
+            return hhText + ':' + mmText;
+        }
+
+        function renderTable(lines30, lines60) {
+            if (!body) return;
+            body.innerHTML = '';
+
+            var rows = [];
+            lines30.forEach(function (r) {
+                rows.push({
+                    time: r.time,
+                    col30: typeof r.mins === 'number' ? (r.mins + ' min') : '30 min',
+                    col60: '\u2014'
+                });
+            });
+            lines60.forEach(function (r) {
+                rows.push({
+                    time: r.time,
+                    col30: '\u2014',
+                    col60: formatMinutesAsHhMm(r.mins)
+                });
+            });
+
+            if (rows.length === 0) {
+                var emptyTr = document.createElement('tr');
+                var emptyTd = document.createElement('td');
+                emptyTd.colSpan = 3;
+                emptyTd.className = 'muted';
+                emptyTd.textContent = 'No notification details.';
+                emptyTr.appendChild(emptyTd);
+                body.appendChild(emptyTr);
+                return;
+            }
+
+            rows.sort(function (a, b) {
+                return a.time.localeCompare(b.time);
+            });
+
+            rows.forEach(function (r) {
+                var tr = document.createElement('tr');
+                var tdTime = document.createElement('td');
+                var td30 = document.createElement('td');
+                var td60 = document.createElement('td');
+                tdTime.textContent = r.time;
+                td30.textContent = r.col30;
+                td60.textContent = r.col60;
+                tr.appendChild(tdTime);
+                tr.appendChild(td30);
+                tr.appendChild(td60);
+                body.appendChild(tr);
+            });
+        }
+
+        function open(btn) {
+            var employee = btn.getAttribute('data-employee') || 'Employee';
+            var date = btn.getAttribute('data-date') || '';
+            var count = btn.getAttribute('data-count') || '0';
+            var bucket30 = btn.getAttribute('data-30') || '';
+            var bucket60 = btn.getAttribute('data-60') || '';
+
+            if (title) title.textContent = 'Email Notification Details';
+            if (subtitle) subtitle.textContent = employee + ' • ' + date + ' • ' + count + ' alert(s)';
+            renderTable(parseLines(bucket30), parseLines(bucket60));
+            modal.hidden = false;
+        }
+
+        function close() {
+            modal.hidden = true;
+        }
+
+        document.querySelectorAll('.js-notif-modal-open').forEach(function (btn) {
+            btn.addEventListener('click', function () { open(btn); });
+        });
+        closeButtons.forEach(function (btn) { btn.addEventListener('click', close); });
+        modal.addEventListener('click', function (e) {
+            if (e.target === modal) close();
+        });
+        document.addEventListener('keydown', function (e) {
+            if (e.key === 'Escape' && !modal.hidden) close();
+        });
+    })();
+</script>

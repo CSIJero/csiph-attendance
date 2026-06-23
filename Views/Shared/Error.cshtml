@@ -1,0 +1,14 @@
+@model ErrorViewModel
+@{
+    ViewData["Title"] = $"{Model.Code}";
+    var isAuthed = User.Identity?.IsAuthenticated == true;
+}
+<div class="auth-wrap">
+    <div class="card auth-card">
+        <h1>@Model.Code</h1>
+        <p class="muted">@Model.Message</p>
+        <a class="btn btn-primary block"
+           asp-controller="@(isAuthed ? "Dashboard" : "Account")"
+           asp-action="@(isAuthed ? "Index" : "Login")">Go back</a>
+    </div>
+</div>

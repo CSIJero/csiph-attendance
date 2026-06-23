@@ -1,0 +1,195 @@
+@model ScheduleViewModel
+@using AttendanceMonitoring.Services
+@{
+    ViewData["Title"] = $"Schedule · {Model.Target.FullName}";
+    var meIdRaw = User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
+    var isMine = int.TryParse(meIdRaw, out var meId) && meId == Model.Target.Id;
+    // Admins get a no-schedule notice. Support users still see the per-date
+    // editor, but with a relaxed banner that explains the wrap-around is
+    // allowed.
+    var noScheduleView = Model.IsAdminTarget;
+    var monthIso = Model.MonthStart.ToString("yyyy-MM");
+    var monthLabel = Model.MonthStart.ToString("MMMM yyyy");
+}
+
+<section class="hero">
+    <div>
+        <h1>
+            @if (isMine) { <text>My schedule</text> } else { <text>@Model.Target.FullName's schedule</text> }
+        </h1>
+        <p class="muted">
+            @if (Model.IsAdminTarget)
+            {
+                <text>Admin accounts don't have a working schedule.</text>
+            }
+            else if (Model.IsSupportTarget)
+            {
+                <text>
+                    <span class="badge-support" style="margin-left:0;">Support (24/7)</span>
+                    Support user &mdash; any times allowed, including overnight shifts
+                    (e.g. <code>16:00 &rarr; 00:00</code> or <code>22:00 &rarr; 06:00</code>).
+                </text>
+            }
+            else if (Model.Editable)
+            {
+                <text>Pick the calendar dates this team member works in @monthLabel. Toggle a day off if they're not working it.</text>
+            }
+            else
+            {
+                <text>Read-only view &mdash; your schedule is set by your administrator.</text>
+            }
+            @if (!noScheduleView)
+            {
+                <text> Total: <strong>@Model.WeeklyHours h / month</strong></text>
+            }
+        </p>
+    </div>
+    @if (Model.ViewerIsAdmin && Model.AllUsers.Count > 0)
+    {
+        <form method="get" asp-controller="Schedule" asp-action="Edit" class="inline">
+            <input type="hidden" name="month" value="@monthIso" />
+            @if (Model.WeekFilter > 0)
+            {
+                <input type="hidden" name="week" value="@Model.WeekFilter" />
+            }
+            <label class="inline-label">Assign schedule for
+                <select name="user_id" onchange="this.form.submit()">
+                    @foreach (var u in Model.AllUsers)
+                    {
+                        <option value="@u.Id" selected="@(u.Id == Model.Target.Id)">@u.FullName</option>
+                    }
+                </select>
+            </label>
+        </form>
+    }
+</section>
+
+@if (!noScheduleView)
+{
+    @* Month + week filter toolbar *@
+    <section class="card" style="margin-bottom:14px;">
+        <div style="display:flex;flex-wrap:wrap;gap:14px;align-items:center;padding:12px 16px;">
+            <form method="get" asp-controller="Schedule" asp-action="Edit" class="inline" style="display:flex;gap:8px;align-items:center;">
+                @if (Model.ViewerIsAdmin)
+                {
+                    <input type="hidden" name="user_id" value="@Model.Target.Id" />
+                }
+                <label class="inline-label">Month
+                    <input type="month" name="month" value="@monthIso" onchange="this.form.submit()" />
+                </label>
+                @if (Model.WeekFilter > 0)
+                {
+                    <input type="hidden" name="week" value="@Model.WeekFilter" />
+                }
+                <noscript><button type="submit" class="btn">Go</button></noscript>
+            </form>
+
+            <div style="display:flex;gap:6px;flex-wrap:wrap;">
+                <span class="muted" style="align-self:center;margin-right:6px;">Week:</span>
+                @{
+                    var allClass = Model.WeekFilter == 0 ? "btn btn-primary" : "btn";
+                }
+                <a class="@allClass"
+                   asp-controller="Schedule" asp-action="Edit"
+                   asp-route-user_id="@(Model.ViewerIsAdmin ? (int?)Model.Target.Id : null)"
+                   asp-route-month="@monthIso">All</a>
+                @for (var w = 1; w <= 5; w++)
+                {
+                    var lastDay = w * 7;
+                    if ((w - 1) * 7 + 1 > DateTime.DaysInMonth(Model.MonthStart.Year, Model.MonthStart.Month)) { break; }
+                    var cls = Model.WeekFilter == w ? "btn btn-primary" : "btn";
+                    <a class="@cls"
+                       asp-controller="Schedule" asp-action="Edit"
+                       asp-route-user_id="@(Model.ViewerIsAdmin ? (int?)Model.Target.Id : null)"
+                       asp-route-month="@monthIso"
+                       asp-route-week="@w">W@(w)</a>
+                }
+            </div>
+        </div>
+    </section>
+}
+
+@if (noScheduleView)
+{
+    <section class="card">
+        <div class="card-header">
+            <h2>No schedule required</h2>
+            <small class="muted">Administrators don't clock a working week.</small>
+        </div>
+        <p class="muted" style="padding:14px 20px 6px 20px;">
+            This account has the <strong>Administrator</strong> role, which is
+            exempt from the schedule. Demote the user to <em>employee</em>
+            or <em>project manager</em> to assign one.
+        </p>
+    </section>
+}
+else
+{
+    @* Only wrap in the Save form when the viewer can actually save *@
+    @if (Model.Editable)
+    {
+        <form method="post" asp-controller="Schedule" asp-action="Save"
+              asp-route-user_id="@(Model.ViewerIsAdmin ? (int?)Model.Target.Id : null)"
+              asp-route-month="@monthIso"
+              asp-route-week="@(Model.WeekFilter > 0 ? (int?)Model.WeekFilter : null)">
+            @Html.AntiForgeryToken()
+            @await Html.PartialAsync("_ScheduleTable", Model)
+            <div class="form-actions">
+                <button type="submit" class="btn btn-primary">Save schedule</button>
+                <a class="btn" asp-controller="Dashboard" asp-action="Index">Cancel</a>
+            </div>
+        </form>
+    }
+    else
+    {
+        @await Html.PartialAsync("_ScheduleTable", Model)
+    }
+} @* end of !IsAdminTarget block *@
+
+@section Scripts {
+<script>
+// Live hours total + disable/enable time inputs based on Working Type.
+// Schedule rows are keyed by ISO date (data-row-date / data-worktype-date /
+// data-toggle-date / data-time-date / data-hours-date). The hidden
+// working_<iso> input mirrors the dropdown so the existing server-side
+// save logic keeps working without changes.
+(function () {
+    const rows = document.querySelectorAll('tr[data-row-date]');
+    function recompute() {
+        rows.forEach(r => {
+            const iso = r.dataset.rowDate;
+            const dropdown = r.querySelector('[data-worktype-date="' + iso + '"]');
+            const toggle = r.querySelector('[data-toggle-date="' + iso + '"]');
+            const inputs = r.querySelectorAll('input[type="time"][data-time-date="' + iso + '"]');
+            const hoursCell = r.querySelector('[data-hours-date="' + iso + '"]');
+            const wt = dropdown ? dropdown.value : 'Onsite';
+            const enabled = wt !== 'Dayoff' && wt !== 'Onleave' && wt !== 'Holiday';
+
+            // Mirror the dropdown selection into the legacy "working_<iso>"
+            // hidden field so the existing POST handler treats Dayoff as
+            // !IsWorking without any controller change.
+            if (toggle) toggle.value = enabled ? 'on' : '';
+
+            inputs.forEach(i => { if (dropdown && !dropdown.disabled) i.disabled = !enabled; });
+
+            let h = 0;
+            if (enabled && inputs.length === 2) {
+                const [s, e] = inputs;
+                if (s.value && e.value) {
+                    const [sh, sm] = s.value.split(':').map(Number);
+                    const [eh, em] = e.value.split(':').map(Number);
+                    let diff = (eh*60+em) - (sh*60+sm);
+                    // Cross-midnight shifts (end <= start) wrap to next day.
+                    if (diff <= 0) diff += 24 * 60;
+                    h = Math.round(diff/60 * 100) / 100;
+                }
+            }
+            if (hoursCell) hoursCell.textContent = h + ' h';
+        });
+    }
+    document.querySelectorAll('select[data-worktype-date], input[type="time"][data-time-date]')
+        .forEach(el => el.addEventListener('change', recompute));
+    recompute();
+})();
+</script>
+}

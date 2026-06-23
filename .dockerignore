@@ -1,0 +1,28 @@
+# Keep the Docker image lean — never copy build artefacts, secrets, local
+# databases, or IDE state into the container.
+
+# Build outputs
+bin/
+obj/
+
+# Local SQLite databases (a fresh one is created on first run inside the
+# mounted volume).
+*.db
+*.db-journal
+*.db.bak
+
+# IDE / editor metadata
+.vs/
+.vscode/
+*.user
+
+# Source control
+.git/
+.gitignore
+.github/
+
+# Misc local scripts that aren't needed in the image.
+send-test-email.ps1
+PROPOSAL.md
+PROPOSAL.txt
+README.md

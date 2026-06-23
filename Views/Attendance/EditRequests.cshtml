@@ -1,0 +1,384 @@
+@using AttendanceMonitoring.Services
+@using AttendanceMonitoring.Data
+@using Microsoft.EntityFrameworkCore
+@inject AppDbContext RequestsDb
+@model AttendanceMonitoring.ViewModels.EditRequestsIndexViewModel
+@{
+    ViewData["Title"] = "Attendance edit requests";
+
+    // Sub-tab badge counts — same queries as the layout, scoped to admins
+    // (this view is admin-only by policy).
+    var pendingEdit = Model.Pending.Count;
+    var pendingLeave = 0;
+    var pendingShift = 0;
+    var pendingQuota = 0;
+    try
+    {
+        pendingLeave = await RequestsDb.LeaveRequests.CountAsync(r => r.Status == "Pending");
+    }
+    catch { /* table may not exist yet on first deploy */ }
+    try
+    {
+        pendingShift = await RequestsDb.ScheduleAmendments.CountAsync(r => r.Status == "Pending");
+    }
+    catch { /* table may not exist yet on first deploy */ }
+    try
+    {
+        pendingQuota = await RequestsDb.QuotaResetRequests.CountAsync(r => r.Status == "Pending");
+    }
+    catch { /* table may not exist yet on first deploy */ }
+
+    var viewer = ViewData["ViewerUser"] as User;
+    var tz = (ViewData["TzLabel"] as string) ?? "PHT";
+}
+
+<section class="hero">
+    <div>
+        <h1>Requests</h1>
+        <p class="muted">
+            Review employee requests for attendance corrections, leave of
+            absence, and shift changes. Use the tabs below to switch
+            between the queues.
+        </p>
+    </div>
+</section>
+
+@await Html.PartialAsync("_RequestsTabs", ("edits", pendingEdit, pendingLeave, pendingShift, pendingQuota))
+
+<section class="card">
+    <div class="card-header">
+        <h2>Attendance edits &mdash; pending review</h2>
+        <small class="muted">@Model.Pending.Count item@(Model.Pending.Count == 1 ? "" : "s")</small>
+    </div>
+    @if (Model.Pending.Count == 0)
+    {
+        <p class="muted">No pending requests. You're all caught up.</p>
+    }
+    else
+    {
+        @* Bulk-action form wraps the table so per-row checkboxes POST in
+           one shot. The per-row Approve / Reject forms still live in the
+           rightmost column for one-off decisions. *@
+        <form method="post"
+              asp-controller="Attendance" asp-action="BulkApproveEditRequests"
+              id="edits-bulk-form">
+            @Html.AntiForgeryToken()
+            <div class="bulk-toolbar" id="edits-bulk-toolbar" hidden>
+                <span><strong id="edits-bulk-count">0</strong> selected</span>
+                <input type="text" name="note" maxlength="500"
+                       placeholder="Optional note (applied to all selected)"
+                       class="note-input" style="flex:1;min-width:220px;" />
+                <button type="submit"
+                        formaction="@Url.Action("BulkApproveEditRequests", "Attendance")"
+                        class="btn btn-success btn-sm"
+                        onclick="return confirm('Approve all selected requests?');">
+                    Approve selected
+                </button>
+                <button type="submit"
+                        formaction="@Url.Action("BulkRejectEditRequests", "Attendance")"
+                        class="btn btn-danger btn-sm"
+                        onclick="return confirm('Reject all selected requests?');">
+                    Reject selected
+                </button>
+                <button type="button" class="btn btn-ghost btn-sm"
+                        id="edits-bulk-deselect">Deselect all</button>
+            </div>
+            <div class="table-wrap">
+                <table class="data-table">
+                    <thead>
+                        <tr>
+                            <th data-no-sort style="width:34px;">
+                                <input type="checkbox" id="edits-master-toggle"
+                                       title="Select / deselect every request" />
+                            </th>
+                            <th>Submitted</th>
+                            <th>Employee</th>
+                            <th>Current</th>
+                            <th>Proposed</th>
+                            <th>Reason</th>
+                            <th>Proof</th>
+                            <th style="width:280px;">Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var r in Model.Pending)
+                        {
+                            var att = r.Attendance;
+                            <tr>
+                                <td data-no-sort>
+                                    <input type="checkbox" class="edits-row-toggle"
+                                           name="ids" value="@r.Id" />
+                                </td>
+                                <td>
+                                    @UserClock.Format(viewer, r.RequestedAt, "yyyy-MM-dd HH:mm")
+                                    <br /><small class="muted">@tz</small>
+                                </td>
+                                <td>
+                                    <strong>@(r.RequestedByUser?.FullName ?? "—")</strong><br />
+                                    <small class="muted">@(r.RequestedByUser?.Username ?? "")</small>
+                                </td>
+                                <td>
+                                    @if (att is not null)
+                                    {
+                                        <div><small class="muted">@att.WorkDate.ToString("yyyy-MM-dd")</small></div>
+                                        <div>@UserClock.Format(viewer, att.CheckIn, "HH:mm") @tz</div>
+                                        <div>
+                                            @if (att.CheckOut is not null)
+                                            {
+                                                @($"{UserClock.Format(viewer, att.CheckOut, "HH:mm")} {tz}")
+                                            }
+                                            else
+                                            {
+                                                <span class="muted">open</span>
+                                            }
+                                        </div>
+                                    }
+                                </td>
+                                <td>
+                                    <div><small class="muted">@r.RequestedWorkDate.ToString("yyyy-MM-dd")</small></div>
+                                    <div><strong>@UserClock.Format(viewer, r.RequestedCheckIn, "HH:mm") @tz</strong></div>
+                                    <div>
+                                        @if (r.RequestedCheckOut is not null)
+                                        {
+                                            <strong>@($"{UserClock.Format(viewer, r.RequestedCheckOut, "HH:mm")} {tz}")</strong>
+                                        }
+                                        else
+                                        {
+                                            <span class="muted">leave open</span>
+                                        }
+                                    </div>
+                                </td>
+                                <td style="max-width:260px;">
+                                    <div style="white-space:pre-wrap;">@r.Reason</div>
+                                </td>
+                                <td>
+                                    @if (!string.IsNullOrWhiteSpace(r.ProofPhoto))
+                                    {
+                                        <img src="@r.ProofPhoto"
+                                             alt="Proof image"
+                                             data-proof-zoom
+                                             title="Click to enlarge"
+                                             style="max-width:120px;max-height:120px;border-radius:8px;border:1px solid rgba(0,0,0,.08);object-fit:cover;cursor:zoom-in;" />
+                                    }
+                                    else
+                                    {
+                                        <span class="muted">No proof</span>
+                                    }
+                                </td>
+                                <td data-no-sort>
+                                    <div class="approve-reject">
+                                        @* Per-row forms posted via the `form=` attribute on the
+                                           buttons so they don't carry the bulk-form checkboxes. *@
+                                        <div class="inline">
+                                            <input type="text"
+                                                   form="edits-approve-@r.Id"
+                                                   name="note"
+                                                   placeholder="Optional note"
+                                                   maxlength="500"
+                                                   class="note-input" />
+                                            <button type="submit"
+                                                    form="edits-approve-@r.Id"
+                                                    class="btn btn-success btn-sm"
+                                                    onclick="return confirm('Approve and overwrite the live attendance row?');">
+                                                Approve
+                                            </button>
+                                        </div>
+                                        <div class="inline" style="margin-top:6px;">
+                                            <input type="text"
+                                                   form="edits-reject-@r.Id"
+                                                   name="note"
+                                                   placeholder="Reason for rejection"
+                                                   maxlength="500"
+                                                   class="note-input" />
+                                            <button type="submit"
+                                                    form="edits-reject-@r.Id"
+                                                    class="btn btn-danger btn-sm">
+                                                Reject
+                                            </button>
+                                        </div>
+                                    </div>
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        </form>
+
+        @* Per-row forms rendered outside the bulk form so single-row
+           POSTs only carry their own input. Buttons in the table point
+           here via the `form=` attribute. *@
+        @foreach (var r in Model.Pending)
+        {
+            <form method="post"
+                  asp-controller="Attendance" asp-action="ApproveEditRequest"
+                  asp-route-id="@r.Id"
+                  id="edits-approve-@r.Id" style="display:none;">
+                @Html.AntiForgeryToken()
+            </form>
+            <form method="post"
+                  asp-controller="Attendance" asp-action="RejectEditRequest"
+                  asp-route-id="@r.Id"
+                  id="edits-reject-@r.Id" style="display:none;">
+                @Html.AntiForgeryToken()
+            </form>
+        }
+
+        <script>
+            (function () {
+                'use strict';
+                var form = document.getElementById('edits-bulk-form');
+                if (!form) return;
+                var master = document.getElementById('edits-master-toggle');
+                var toolbar = document.getElementById('edits-bulk-toolbar');
+                var countEl = document.getElementById('edits-bulk-count');
+                var deselect = document.getElementById('edits-bulk-deselect');
+                var rowBoxes = form.querySelectorAll('input.edits-row-toggle');
+                function update() {
+                    var picked = 0;
+                    rowBoxes.forEach(function (cb) { if (cb.checked) picked++; });
+                    if (countEl) countEl.textContent = picked;
+                    if (toolbar) toolbar.hidden = picked === 0;
+                    if (master) {
+                        master.checked = picked > 0 && picked === rowBoxes.length;
+                        master.indeterminate = picked > 0 && picked < rowBoxes.length;
+                    }
+                }
+                rowBoxes.forEach(function (cb) { cb.addEventListener('change', update); });
+                if (master) {
+                    master.addEventListener('change', function () {
+                        rowBoxes.forEach(function (cb) { cb.checked = master.checked; });
+                        update();
+                    });
+                }
+                if (deselect) {
+                    deselect.addEventListener('click', function () {
+                        rowBoxes.forEach(function (cb) { cb.checked = false; });
+                        update();
+                    });
+                }
+                update();
+            })();
+        </script>
+    }
+</section>
+
+<section class="card">
+    <div class="card-header">
+        <h2>Recently decided</h2>
+        <small class="muted">Last 25 approved / rejected requests.</small>
+    </div>
+    @if (Model.Recent.Count == 0)
+    {
+        <p class="muted">No decisions yet.</p>
+    }
+    else
+    {
+        <div class="table-wrap">
+            <table class="data-table">
+                <thead>
+                    <tr>
+                        <th>Decided</th>
+                        <th>Status</th>
+                        <th>Employee</th>
+                        <th>Proposed</th>
+                        <th>Reason</th>
+                        <th>Proof</th>
+                        <th>Decided by</th>
+                        <th>Note</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var r in Model.Recent)
+                    {
+                        var pill = r.Status == "Approved" ? "badge-done" : "badge-pending";
+                        <tr>
+                            <td>
+                                @if (r.DecidedAt is not null)
+                                {
+                                    @UserClock.Format(viewer, r.DecidedAt, "yyyy-MM-dd HH:mm")
+                                    <br /><small class="muted">@tz</small>
+                                }
+                            </td>
+                            <td><span class="badge @pill">@r.Status</span></td>
+                            <td>@(r.RequestedByUser?.FullName ?? "—")</td>
+                            <td>
+                                <small class="muted">@r.RequestedWorkDate.ToString("yyyy-MM-dd")</small><br />
+                                @UserClock.Format(viewer, r.RequestedCheckIn, "HH:mm")
+                                @if (r.RequestedCheckOut is not null)
+                                {
+                                    <text> – </text>
+                                    @UserClock.Format(viewer, r.RequestedCheckOut, "HH:mm")
+                                }
+                                <small class="muted"> @tz</small>
+                            </td>
+                            <td style="max-width:200px;">
+                                <div style="white-space:pre-wrap;">@r.Reason</div>
+                            </td>
+                            <td>
+                                @if (!string.IsNullOrWhiteSpace(r.ProofPhoto))
+                                {
+                                    <img src="@r.ProofPhoto"
+                                         alt="Proof image"
+                                         data-proof-zoom
+                                         title="Click to enlarge"
+                                         style="max-width:96px;max-height:96px;border-radius:8px;border:1px solid rgba(0,0,0,.08);object-fit:cover;cursor:zoom-in;" />
+                                }
+                                else
+                                {
+                                    <span class="muted">No proof</span>
+                                }
+                            </td>
+                            <td>@(r.DecidedByUser?.FullName ?? "—")</td>
+                            <td style="max-width:200px;">
+                                <div style="white-space:pre-wrap;">@(r.DecisionNote ?? "")</div>
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    }
+</section>
+
+@* ------------------------------------------------------------------
+   Proof-image lightbox. Reuses the same .selfie-lightbox styling as
+   the Attendance Index / Dashboard so the visual is consistent. The
+   thumbnail in the Proof column is marked with [data-proof-zoom]; a
+   single delegated click handler swaps the big <img>'s src and toggles
+   the overlay. Clicking the dim backdrop or pressing Escape closes it;
+   clicking the image itself does NOT close (you're trying to read it).
+   ------------------------------------------------------------------ *@
+<div class="selfie-lightbox" id="proof-lightbox" hidden>
+    <img id="proof-lightbox-img" src="" alt="Proof image — enlarged" />
+</div>
+
+@section Scripts {
+    <script>
+        (function () {
+            const lb = document.getElementById("proof-lightbox");
+            const lbImg = document.getElementById("proof-lightbox-img");
+            if (!lb || !lbImg) return;
+            document.addEventListener("click", (e) => {
+                const thumb = e.target.closest("[data-proof-zoom]");
+                if (thumb) {
+                    lbImg.src = thumb.getAttribute("src");
+                    lb.hidden = false;
+                    return;
+                }
+                // Only the backdrop dismisses; clicking the enlarged image
+                // itself should not close (the reviewer is trying to read it).
+                if (!lb.hidden && e.target === lb) {
+                    lb.hidden = true;
+                    lbImg.removeAttribute("src");
+                }
+            });
+            document.addEventListener("keydown", (e) => {
+                if (!lb.hidden && e.key === "Escape") {
+                    lb.hidden = true;
+                    lbImg.removeAttribute("src");
+                }
+            });
+        })();
+    </script>
+}

@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 720 200" role="img" aria-label="CSI Interfusion">
+  <!-- Round blue badge with 'CSI' + swoosh -->
+  <g>
+    <circle cx="100" cy="100" r="96" fill="#1E50A2"/>
+    <text x="100" y="112"
+          font-family="'Arial Black','Helvetica Neue',Arial,sans-serif"
+          font-size="72" font-weight="900"
+          fill="#ffffff" text-anchor="middle"
+          letter-spacing="2">CSI</text>
+    <path d="M40 138 Q100 168 160 138 L160 150 Q100 180 40 150 Z" fill="#ffffff"/>
+    <path d="M52 132 Q100 152 148 132" fill="none" stroke="#ffffff" stroke-width="3" stroke-linecap="round"/>
+  </g>
+
+  <!-- Wordmark -->
+  <text x="220" y="118"
+        font-family="'Helvetica Neue',Arial,sans-serif"
+        font-size="56" font-weight="800"
+        fill="#1E50A2"
+        letter-spacing="-1">CSI Interfusion</text>
+  <text x="222" y="158"
+        font-family="'Helvetica Neue',Arial,sans-serif"
+        font-size="22" font-weight="500"
+        fill="#8E8E90"
+        letter-spacing="4">ATTENDANCE MONITOR</text>
+</svg>

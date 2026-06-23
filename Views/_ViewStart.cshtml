@@ -1,0 +1,14 @@
+@using AttendanceMonitoring.Data
+@using AttendanceMonitoring.Services
+@inject IHttpContextAccessor ViewerHttpContextAccessor
+@inject AppDbContext ViewerDb
+@{
+    Layout = "_Layout";
+
+    // Resolve the signed-in user once per request and stash on ViewData
+    // so every page / partial can render times in that user's timezone
+    // (IST for India BUs, PHT otherwise) without re-querying the DB.
+    var viewerUser = UserClock.Resolve(ViewerHttpContextAccessor.HttpContext, ViewerDb);
+    ViewData["ViewerUser"] = viewerUser;
+    ViewData["TzLabel"] = UserClock.Label(viewerUser);
+}

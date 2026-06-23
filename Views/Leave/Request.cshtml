@@ -1,0 +1,159 @@
+@using AttendanceMonitoring.Services
+@model AttendanceMonitoring.ViewModels.LeaveRequestFormViewModel
+@{
+    ViewData["Title"] = "Request leave of absence";
+}
+
+<section class="hero">
+    <div>
+        <h1>Request leave of absence</h1>
+        <p class="muted">
+            File a leave request that your PM (or admin) will approve.
+            <br />
+            <strong>Full day</strong> = 8 hours per day in the range.
+            <strong>Half day</strong> = 4 hours for one day.
+            <strong>Undertime</strong> = a custom number of hours short for one day.
+            <strong>Early checkout</strong> = unlock today's check-out before
+            the required render hours (8h Support / 9h others) are met.
+            Approved half-day and undertime requests also unlock early
+            check-out.
+        </p>
+    </div>
+</section>
+
+<section class="card">
+    <div class="card-header"><h2>New request</h2></div>
+    <form method="post"
+          asp-controller="Leave"
+          asp-action="RequestPost"
+          class="stacked-form"
+          id="leave-form">
+        @Html.AntiForgeryToken()
+
+        @if (Model.ViewerIsAdmin)
+        {
+            <label>
+                <span>For employee <small class="muted">— defaults to yourself</small></span>
+                <select name="target_user_id">
+                    @foreach (var u in Model.CandidateUsers)
+                    {
+                        var sel = u.Id == Model.TargetUserId ? "selected" : null;
+                        <option value="@u.Id" selected="@sel">@u.FullName @(string.IsNullOrEmpty(u.EmployeeId) ? "" : $"({u.EmployeeId})")</option>
+                    }
+                </select>
+            </label>
+        }
+        else
+        {
+            <input type="hidden" name="target_user_id" value="@Model.TargetUserId" />
+        }
+
+        <label>
+            <span>Leave type</span>
+            <select name="leave_type" id="leave-type">
+                <option value="Full">Full day (8 hours)</option>
+                <option value="HalfDay">Half day (4 hours)</option>
+                <option value="Undertime">Undertime (custom hours)</option>
+                <option value="EarlyCheckout">Early checkout (today)</option>
+            </select>
+        </label>
+
+        <label>
+            <span>Start date &amp; time</span>
+            <input type="datetime-local" name="start_date"
+                   value="@Model.StartDate.ToString("yyyy-MM-ddTHH:mm")"
+                   id="leave-start" required />
+        </label>
+
+        <label id="end-row">
+            <span>End date &amp; time <small class="muted">— inclusive</small></span>
+            <input type="datetime-local" name="end_date"
+                   value="@Model.EndDate.ToString("yyyy-MM-ddTHH:mm")"
+                   id="leave-end" required />
+        </label>
+
+        <label id="hours-row" hidden>
+            <span>Hours short <small class="muted">— 0.5 to 8</small></span>
+            <input type="number" name="hours_per_day"
+                   id="leave-hours"
+                   min="0.5" max="8" step="0.5" value="1" />
+        </label>
+
+        <label>
+            <span>Reason <small class="muted">— required, 5+ characters</small></span>
+            <textarea name="reason" rows="3" maxlength="500" required
+                      placeholder="e.g. Medical appointment in the afternoon."></textarea>
+        </label>
+
+        <label>
+            <span>Image Proof <small class="muted">— required</small></span>
+            <input type="file" id="leave-proof-picker" accept="image/*" required />
+            <input type="hidden" id="leave-proof-photo" name="proof_photo" />
+            <small class="muted">Upload screenshot/photo evidence (e.g. medical certificate).</small>
+        </label>
+
+        <div class="form-actions">
+            <button type="submit" class="btn btn-primary">Submit request</button>
+            <a class="btn" asp-controller="Leave" asp-action="Index">Cancel</a>
+        </div>
+    </form>
+</section>
+
+@section Scripts {
+    <script>
+        (function () {
+            const typeEl = document.getElementById("leave-type");
+            const endRow = document.getElementById("end-row");
+            const hoursRow = document.getElementById("hours-row");
+            const startEl = document.getElementById("leave-start");
+            const endEl = document.getElementById("leave-end");
+            if (!typeEl) return;
+
+            // Show / hide the End-date and Hours-per-day fields depending
+            // on the chosen leave type. Half-day & undertime collapse to a
+            // single day, so we sync the end-of-leave to the same date as
+            // the start (keeping the user's chosen end time).
+            function sync() {
+                const t = typeEl.value;
+                const isFull = t === "Full";
+                const isUT = t === "Undertime";
+                const isEC = t === "EarlyCheckout";
+                endRow.hidden = false;
+                // Hours-short input is meaningful for Undertime and Early
+                // checkout (how many hours short the worker will be).
+                hoursRow.hidden = !(isUT || isEC);
+                if (!isFull && startEl && endEl && startEl.value && endEl.value) {
+                    // Pin end to the same calendar day as start (keep its time).
+                    const sDate = startEl.value.split("T")[0];
+                    const eTime = endEl.value.split("T")[1] || "18:00";
+                    endEl.value = `${sDate}T${eTime}`;
+                }
+            }
+            typeEl.addEventListener("change", sync);
+            startEl?.addEventListener("change", () => {
+                if (typeEl.value !== "Full" && startEl.value && endEl.value) {
+                    const sDate = startEl.value.split("T")[0];
+                    const eTime = endEl.value.split("T")[1] || "18:00";
+                    endEl.value = `${sDate}T${eTime}`;
+                }
+            });
+            sync();
+        })();
+
+        // Proof-photo file picker → base64 data URL
+        (function () {
+            const picker = document.getElementById('leave-proof-picker');
+            const hidden = document.getElementById('leave-proof-photo');
+            if (!picker || !hidden) return;
+            picker.addEventListener('change', function () {
+                const file = picker.files && picker.files[0];
+                if (!file) { hidden.value = ''; return; }
+                const reader = new FileReader();
+                reader.onload = function (e) {
+                    hidden.value = (e.target && e.target.result) ? String(e.target.result) : '';
+                };
+                reader.readAsDataURL(file);
+            });
+        })();
+    </script>
+}

@@ -1,0 +1,196 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Reminders – Attendance Monitoring</title>
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="stylesheet" href="/css/style.css?v=G4IhSRUmfhELVqa0EJV8TC5aqUmsOWhUB9vuJQfGKAM" />
+</head>
+<body>
+        <div class="app-shell">
+            <button type="button" class="sidebar-backdrop" id="sidebar-backdrop"
+                    aria-label="Close navigation"></button>
+
+            <aside class="sidebar" id="sidebar" aria-label="Primary navigation">
+                <div class="sidebar-header">
+                    <a class="brand-link" href="/Dashboard">
+                        <img src="/images/logo-mark.svg" alt="CSI Interfusion" class="brand-logo" />
+                        <span class="brand-text">
+                            <strong>CSI Interfusion</strong>
+                            <small>Attendance Monitor</small>
+                        </span>
+                    </a>
+                </div>
+
+                <div class="sidebar-section-label">Navigation</div>
+                <nav class="sidebar-nav">
+                    <a class="nav-link" href="/Dashboard">Dashboard</a>
+                        <a class="nav-link" href="/reports">Reports</a>
+                        <a class="nav-link" href="/schedule">Schedules</a>
+                        <a class="nav-link nav-users" href="/attendance/edit-requests">
+                            <text>Requests</text>
+                        </a>
+                        <a class="nav-link nav-users" href="/Users">
+                            <text>Users</text>
+                        </a>
+                        <a class="nav-link active" href="/violations">
+                            <text>Reminders</text>
+                        </a>
+                            <a class="nav-link" href="/Roles">Configuration</a>
+                            <a class="nav-link" href="/settings">Settings</a>
+                </nav>
+
+                <div class="sidebar-footer">
+                    <a class="user-pill" title="View your profile" href="/profile">
+                        <span class="dot dot-online" id="self-status-dot"></span>
+                        System Administrator
+                        <small>(admin)</small>
+                    </a>
+                    <div class="sidebar-account-links">
+                        <a class="nav-link" href="/profile">Profile</a>
+                        <a class="nav-link" href="/Account/ChangePassword">
+                            Change password
+                        </a>
+                    </div>
+                    <form method="post" class="inline" action="/Account/Logout">
+                        
+                        <button type="submit" class="btn btn-ghost">Logout</button>
+                    <input name="__RequestVerificationToken" type="hidden" value="CfDJ8MYJoRw5nZZMokVxNmdcbQNVcFCcZAypI9qPWEnNQoUrrdveUmFIiRsiF-w7By92RkJ7gO4eiTqls7ANAtw8rczrajVHMzpwbgEwaVcytIc3HLh8dOYT4JgQgpYVwy9SMLa2NuzsgauWvM7eKnyAyAVS1fp4qZW_Vz_eSVuiN8FVh58EkXQZGwAmbHPG2GCf7Q" /></form>
+                </div>
+            </aside>
+
+            <div class="app-main">
+                <header class="app-topbar">
+                    <div class="topbar-left">
+                        <button type="button" class="sidebar-toggle" id="sidebar-toggle"
+                                aria-label="Toggle navigation" aria-controls="sidebar">
+                            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"
+                                 fill="none" stroke="currentColor" stroke-width="2"
+                                 stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                                <line x1="3" y1="6" x2="21" y2="6"></line>
+                                <line x1="3" y1="12" x2="21" y2="12"></line>
+                                <line x1="3" y1="18" x2="21" y2="18"></line>
+                            </svg>
+                        </button>
+                        <h1 class="page-title">Reminders</h1>
+                    </div>
+                </header>
+
+                <main class="container">
+                        <div class="flashes">
+                                <div class="flash flash-success">Welcome back, System Administrator!</div>
+                        </div>
+
+                    
+<section class="hero">
+    <div>
+        <h1>Reminders</h1>
+        <p class="muted">
+            Each row is an offline-during-shift alert detected by the
+            background monitor. Issue a formal warning or override the
+            reminder. Decisions are stamped on the same audit row so the
+            original alert is preserved.
+        </p>
+    </div>
+</section>
+
+<nav class="subtabs" aria-label="Reminders filter">
+    <a class="subtab subtab-active" href="/violations?filter=pending">
+        <span>Pending</span>
+    </a>
+    <a class="subtab" href="/violations?filter=actioned">
+        <span>Actioned</span>
+    </a>
+    <a class="subtab" href="/violations?filter=all">
+        <span>All</span>
+    </a>
+</nav>
+
+<section class="card">
+    <div class="card-header">
+        <h2>
+Pending reminders        </h2>
+        <small class="muted">0 rows (latest 500)</small>
+    </div>
+
+        <p class="muted">No matching reminders.</p>
+</section>
+
+                </main>
+
+                <footer class="footer">
+                    <small>
+                        Online threshold: 60 s
+                        &middot; Server time:
+                        <span id="server-time">2026-05-18 14:11 PHT</span>
+                    </small>
+                </footer>
+            </div>
+        </div>
+
+<div class="modal-backdrop selfie-modal-backdrop" id="selfie-modal" hidden aria-hidden="true">
+    <div class="modal selfie-modal" role="dialog" aria-labelledby="selfie-modal-title" aria-modal="true">
+        <header class="modal-header">
+            <div>
+                <h3 id="selfie-modal-title">Take a selfie</h3>
+                <small class="muted" id="selfie-modal-subtitle">
+                    Look at the camera, then click <strong>Capture</strong>.
+                </small>
+            </div>
+            <button type="button" class="modal-close" data-selfie-cancel aria-label="Close">&times;</button>
+        </header>
+
+        <div class="selfie-stage">
+            <video id="selfie-video" autoplay playsinline muted></video>
+            <canvas id="selfie-canvas" hidden></canvas>
+            <img id="selfie-preview" alt="Captured selfie preview" hidden />
+            <div class="selfie-overlay" id="selfie-overlay">
+                <div class="selfie-frame" aria-hidden="true"></div>
+                <p class="muted" id="selfie-status">Starting camera&hellip;</p>
+            </div>
+        </div>
+
+        <footer class="modal-footer selfie-actions">
+            <button type="button" class="btn btn-ghost" data-selfie-cancel>Cancel</button>
+            <button type="button" class="btn btn-secondary" id="selfie-retake" hidden>Retake</button>
+            <button type="button" class="btn btn-primary" id="selfie-capture">Capture</button>
+            <button type="button" class="btn btn-primary" id="selfie-confirm" hidden>Use photo &amp; submit</button>
+        </footer>
+    </div>
+</div>
+        <script src="/js/app.js?v=gGgSvTdl3_ibCF1VNzeGkZScRmGWWxdH1svC8vA8JiA"></script>
+        <script src="/js/selfie.js?v=YbOtJZWMW2qV2yEpkhGQjelk_orI1jTbpGvCTVxXQYA"></script>
+        <script>
+            (function () {
+                var sidebar = document.getElementById('sidebar');
+                var toggle = document.getElementById('sidebar-toggle');
+                var backdrop = document.getElementById('sidebar-backdrop');
+                if (!sidebar || !toggle) return;
+                function close() {
+                    sidebar.classList.remove('is-open');
+                    if (backdrop) backdrop.classList.remove('is-visible');
+                }
+                function open() {
+                    sidebar.classList.add('is-open');
+                    if (backdrop) backdrop.classList.add('is-visible');
+                }
+                toggle.addEventListener('click', function () {
+                    if (sidebar.classList.contains('is-open')) close(); else open();
+                });
+                if (backdrop) backdrop.addEventListener('click', close);
+                // Close after navigating (sidebar links).
+                sidebar.querySelectorAll('a.nav-link').forEach(function (a) {
+                    a.addEventListener('click', function () {
+                        if (window.matchMedia('(max-width: 880px)').matches) close();
+                    });
+                });
+                window.addEventListener('keydown', function (e) {
+                    if (e.key === 'Escape') close();
+                });
+            })();
+        </script>
+    <script src="/js/table-sort.js?v=XPC-klFNT1vlT8peTWQN9-aI15N3bwTHDhjLWpHqiFg"></script>
+    
+</body>
+</html>

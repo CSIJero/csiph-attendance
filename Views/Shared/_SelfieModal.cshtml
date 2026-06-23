@@ -1,0 +1,36 @@
+@*
+    Reusable camera modal that captures a selfie before submitting check-in
+    or check-out. Each form that wants the camera step has class
+    "selfie-form" with a hidden <input name="photo"> and a single
+    [data-selfie-trigger] button. The shared modal lives once per page.
+*@
+<div class="modal-backdrop selfie-modal-backdrop" id="selfie-modal" hidden aria-hidden="true">
+    <div class="modal selfie-modal" role="dialog" aria-labelledby="selfie-modal-title" aria-modal="true">
+        <header class="modal-header">
+            <div>
+                <h3 id="selfie-modal-title">Take a selfie</h3>
+                <small class="muted" id="selfie-modal-subtitle">
+                    Look at the camera, then click <strong>Capture</strong>.
+                </small>
+            </div>
+            <button type="button" class="modal-close" data-selfie-cancel aria-label="Close">&times;</button>
+        </header>
+
+        <div class="selfie-stage">
+            <video id="selfie-video" autoplay playsinline muted></video>
+            <canvas id="selfie-canvas" hidden></canvas>
+            <img id="selfie-preview" alt="Captured selfie preview" hidden />
+            <div class="selfie-overlay" id="selfie-overlay">
+                <div class="selfie-frame" aria-hidden="true"></div>
+                <p class="muted" id="selfie-status">Starting camera&hellip;</p>
+            </div>
+        </div>
+
+        <footer class="modal-footer selfie-actions">
+            <button type="button" class="btn btn-ghost" data-selfie-cancel>Cancel</button>
+            <button type="button" class="btn btn-secondary" id="selfie-retake" hidden>Retake</button>
+            <button type="button" class="btn btn-primary" id="selfie-capture">Capture</button>
+            <button type="button" class="btn btn-primary" id="selfie-confirm" hidden>Use photo &amp; submit</button>
+        </footer>
+    </div>
+</div>

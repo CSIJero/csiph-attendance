@@ -1,0 +1,111 @@
+@model AttendanceMonitoring.Models.Attendance
+@{
+    ViewData["Title"] = $"Edit attendance · {Model.User?.FullName}";
+    // The form posts wall-clock values back; treat them in the *subject's*
+    // local zone (IST for India BUs, PHT otherwise) so round-tripping
+    // matches what the user sees.
+    var subject = Model.User;
+    var subjectTz = AttendanceMonitoring.Services.UserClock.Label(subject);
+    var subjectOffset = AttendanceMonitoring.Services.UserClock.DisplayOffset(subject);
+    DateTime? ToLocal(DateTime? utc)
+    {
+        if (utc is null) return null;
+        var v = utc.Value;
+        if (v.Kind == DateTimeKind.Unspecified) v = DateTime.SpecifyKind(v, DateTimeKind.Utc);
+        return new DateTimeOffset(v).ToOffset(subjectOffset).DateTime;
+    }
+    var ciPh = ToLocal(Model.CheckIn);
+    var coPh = ToLocal(Model.CheckOut);
+    var returnUrl = Context.Request.Headers["Referer"].ToString();
+}
+
+<section class="hero">
+    <div>
+        <h1>Edit attendance</h1>
+        <p class="muted">
+            Adjusting <strong>@Model.User?.FullName</strong>'s record for
+            <strong>@Model.WorkDate.ToString("yyyy-MM-dd")</strong>.
+            Times are in @subjectTz (your local zone).
+        </p>
+    </div>
+</section>
+
+<section class="card">
+    <form method="post"
+          asp-controller="Attendance"
+          asp-action="EditPost"
+          asp-route-id="@Model.Id"
+          class="stacked-form">
+        @Html.AntiForgeryToken()
+        <input type="hidden" name="return_url" value="@returnUrl" />
+
+        <label>
+            <span>Work date</span>
+            <input type="date" name="work_date"
+                   value="@Model.WorkDate.ToString("yyyy-MM-dd")"
+                   required />
+        </label>
+
+        <label>
+            <span>Check-in (@subjectTz)</span>
+            <input type="datetime-local" name="check_in" required
+                   value="@(ciPh?.ToString("yyyy-MM-ddTHH:mm") ?? "")" />
+        </label>
+
+        <label>
+            <span>Check-out (@subjectTz) <small class="muted">— leave blank to keep open</small></span>
+            <input type="datetime-local" name="check_out"
+                   value="@(coPh?.ToString("yyyy-MM-ddTHH:mm") ?? "")" />
+        </label>
+
+        <div class="form-actions">
+            <button type="submit" class="btn btn-primary">Save changes</button>
+            <a class="btn"
+               asp-controller="Attendance"
+               asp-action="Index"
+               asp-route-user_id="@Model.UserId">Cancel</a>
+        </div>
+    </form>
+</section>
+
+@if (!string.IsNullOrEmpty(Model.CheckInPhoto) || !string.IsNullOrEmpty(Model.CheckOutPhoto))
+{
+    <section class="card">
+        <div class="card-header">
+            <h2>Selfies on file</h2>
+            <small class="muted">Recorded by the employee at the time of the action.</small>
+        </div>
+        <div style="display:flex;gap:24px;flex-wrap:wrap;align-items:flex-start;">
+            @if (!string.IsNullOrEmpty(Model.CheckInPhoto))
+            {
+                <div>
+                    <div class="muted" style="margin-bottom:6px;">Check-in</div>
+                    <img src="@Model.CheckInPhoto" style="max-width:200px;border-radius:8px;" />
+                </div>
+            }
+            @if (!string.IsNullOrEmpty(Model.CheckOutPhoto))
+            {
+                <div>
+                    <div class="muted" style="margin-bottom:6px;">Check-out</div>
+                    <img src="@Model.CheckOutPhoto" style="max-width:200px;border-radius:8px;" />
+                </div>
+            }
+        </div>
+    </section>
+}
+
+<section class="card">
+    <div class="card-header">
+        <h2 style="color:#b91c1c;">Danger zone</h2>
+        <small class="muted">Removes this row entirely.</small>
+    </div>
+    <form method="post"
+          asp-controller="Attendance"
+          asp-action="Delete"
+          asp-route-id="@Model.Id"
+          onsubmit="return confirm('Delete this attendance row? This cannot be undone.');">
+        @Html.AntiForgeryToken()
+        <input type="hidden" name="return_url" value="@returnUrl" />
+        <button type="submit" class="btn btn-danger">Delete record</button>
+    </form>
+</section>

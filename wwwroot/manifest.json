@@ -1,0 +1,18 @@
+{
+  "name": "Attendance Monitoring",
+  "short_name": "Attendance",
+  "description": "Coalition attendance monitoring & roster management.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#0f172a",
+  "theme_color": "#2c3e50",
+  "icons": [
+    {
+      "src": "/favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

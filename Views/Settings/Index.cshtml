@@ -1,0 +1,83 @@
+@model AttendanceMonitoring.ViewModels.SettingsIndexViewModel
+@{
+    ViewData["Title"] = "System Settings";
+}
+
+<section class="hero">
+    <div>
+        <h1>System Settings</h1>
+        <p class="muted">
+            Runtime policy settings can be edited below and apply immediately.
+            The reference sections under it are sourced from
+            <code>appsettings.json</code> and environment variables. To
+            change a value, update the configuration at the deployment
+            level (Render dashboard or local file) and restart the app.
+        </p>
+    </div>
+</section>
+
+<section class="card">
+    <div class="card-header">
+        <h2>Runtime Policy (Editable)</h2>
+    </div>
+    <div class="card-body" style="padding:16px 18px;">
+        <form method="post" asp-controller="Settings" asp-action="SaveRuntime" class="form-grid" style="display:grid;gap:14px;max-width:760px;">
+            @Html.AntiForgeryToken()
+
+            <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px;">
+                <label>
+                    <span class="field-label">PH Onsite Grace (minutes)</span>
+                    <input type="number" name="graceOnsitePhMinutes" min="0" max="240" value="@Model.GraceOnsitePhMinutes" required />
+                </label>
+                <label>
+                    <span class="field-label">PH Offsite Grace (minutes)</span>
+                    <input type="number" name="graceOffsitePhMinutes" min="0" max="240" value="@Model.GraceOffsitePhMinutes" required />
+                </label>
+                <label>
+                    <span class="field-label">India Grace (minutes)</span>
+                    <input type="number" name="graceIndiaMinutes" min="0" max="240" value="@Model.GraceIndiaMinutes" required />
+                </label>
+            </div>
+
+            <label>
+                <span class="field-label">Business Units</span>
+                <textarea name="businessUnitsText" rows="8" style="width:100%;">@Model.BusinessUnitsText</textarea>
+                <small class="muted">One BU per line. You can also separate with comma or semicolon.</small>
+            </label>
+
+            <div>
+                <button class="btn btn-primary" type="submit">Save Runtime Policy</button>
+            </div>
+        </form>
+    </div>
+</section>
+
+@foreach (var entry in Model.Sections)
+{
+    <section class="card">
+        <div class="card-header">
+            <h2>@entry.Section</h2>
+        </div>
+        <div class="table-wrap">
+            <table class="data-table">
+                <thead>
+                    <tr>
+                        <th style="width:240px;">Setting</th>
+                        <th style="width:260px;">Current value</th>
+                        <th>Description</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var item in entry.Items)
+                    {
+                        <tr>
+                            <td><strong>@item.Key</strong></td>
+                            <td><code>@item.Value</code></td>
+                            <td class="muted">@item.Note</td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    </section>
+}

@@ -1,0 +1,196 @@
+@model WeeklyAttendanceViewModel
+@{
+    ViewData["Title"] = "Weekly attendance";
+    var viewer = ViewData["ViewerUser"] as User;
+    var totalDays = Model.WeeksSpan * 7;
+    var rangeEnd = Model.WeekStart.AddDays(totalDays - 1);
+
+    string QueryString()
+    {
+        var parts = new List<string>
+        {
+            $"week={Model.WeekStart:yyyy-MM-dd}",
+            $"weeks={Model.WeeksSpan}",
+        };
+        if (Model.FilterUserId is int u) parts.Add($"user_id={u}");
+        if (Model.PresentOnly) parts.Add("present_only=true");
+        return "?" + string.Join("&", parts);
+    }
+
+    string NavQs(DateOnly start) =>
+        $"?week={start:yyyy-MM-dd}&weeks={Model.WeeksSpan}"
+        + (Model.FilterUserId is int u ? $"&user_id={u}" : "")
+        + (Model.PresentOnly ? "&present_only=true" : "");
+}
+
+@await Html.PartialAsync("_ReportTabs", "weekly")
+
+<section class="hero">
+    <div>
+        <h1>Weekly attendance</h1>
+        <p class="muted">
+            @if (Model.WeeksSpan == 2)
+            {
+                <text>2-week range</text>
+            }
+            else
+            {
+                <text>Week of</text>
+            }
+            <strong>@Model.WeekStart.ToString("MMM d")</strong> &ndash;
+            <strong>@rangeEnd.ToString("MMM d, yyyy")</strong>
+            @if (Model.IsCurrentWeek)
+            {
+                <span class="badge badge-active" style="margin-left:8px;">This week</span>
+            }
+        </p>
+    </div>
+    <div class="hero-actions">
+        <a class="btn" href="@NavQs(Model.PrevWeekStart)">&larr; Prev</a>
+        @if (!Model.IsCurrentWeek)
+        {
+            <a class="btn" href="@NavQs(Model.CurrentWeekStart)">This week</a>
+        }
+        <a class="btn" href="@NavQs(Model.NextWeekStart)">Next &rarr;</a>
+        <a class="btn btn-secondary"
+           data-confirm="Extract the Weekly Attendance report to Excel? The file will use the same week range and filters shown above."
+           href="@Url.Action("WeeklyXlsx", "Reports")@QueryString()">
+            Export to Excel
+        </a>
+    </div>
+</section>
+
+<section class="card">
+    <div class="card-header">
+        <h2>Filters</h2>
+        <small class="muted">All filters combine; Excel export uses the same selection.</small>
+    </div>
+    <form method="get" class="filter-row" action="@Url.Action("Weekly", "Reports")">
+        <label class="inline-label">
+            <span>Date (any date in week)</span>
+            <input type="date" name="week" value="@Model.WeekStart.ToString("yyyy-MM-dd")" />
+        </label>
+        <label class="inline-label">
+            <span>Range</span>
+            <select name="weeks">
+                <option value="1" selected="@(Model.WeeksSpan == 1 ? "selected" : null)">1 week</option>
+                <option value="2" selected="@(Model.WeeksSpan == 2 ? "selected" : null)">2 weeks</option>
+            </select>
+        </label>
+        <label class="inline-label">
+            <span>User</span>
+            <select name="user_id">
+                <option value="">— All users —</option>
+                @foreach (var u in Model.AllUsers)
+                {
+                    var selected = Model.FilterUserId == u.Id ? "selected" : null;
+                    <option value="@u.Id" selected="@selected">@u.FullName (@u.Username)</option>
+                }
+            </select>
+        </label>
+        <label class="inline-label" style="flex-direction:row;align-items:center;gap:8px;">
+            <input type="checkbox" name="present_only" value="true"
+                   @(Model.PresentOnly ? "checked" : "") />
+            <span>Show only users with attendance in range</span>
+        </label>
+        <div style="display:flex;gap:8px;">
+            <button type="submit" class="btn btn-primary">Apply</button>
+            <a class="btn" href="@Url.Action("Weekly", "Reports")">Reset</a>
+        </div>
+    </form>
+</section>
+
+<section class="card">
+    <div class="card-header">
+        <h2>Team attendance</h2>
+        <small class="muted">
+            @Model.Rows.Count user@(Model.Rows.Count == 1 ? "" : "s") &middot;
+            @Model.TeamPresentDays day@(Model.TeamPresentDays == 1 ? "" : "s") present &middot;
+            @PhTime.FormatDurationMinutes(Model.TeamTotalMinutes) total
+        </small>
+    </div>
+    <div class="table-wrap">
+        <table class="data-table week-table">
+            <thead>
+                @if (Model.WeeksSpan == 2)
+                {
+                    <tr>
+                        <th rowspan="2">Name</th>
+                        <th colspan="7" class="week-band">
+                            Week 1 &middot; @Model.WeekStart.ToString("MMM d") &ndash;
+                            @Model.WeekStart.AddDays(6).ToString("MMM d")
+                        </th>
+                        <th colspan="7" class="week-band">
+                            Week 2 &middot; @Model.WeekStart.AddDays(7).ToString("MMM d") &ndash;
+                            @rangeEnd.ToString("MMM d")
+                        </th>
+                        <th rowspan="2">Total</th>
+                    </tr>
+                }
+                <tr>
+                    @if (Model.WeeksSpan == 1)
+                    {
+                        <th>Name</th>
+                    }
+                    @{
+                        var shortDays = new[] { "Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun" };
+                    }
+                    @for (var i = 0; i < totalDays; i++)
+                    {
+                        var d = Model.WeekStart.AddDays(i);
+                        var isToday = d == PhTime.Today;
+                        <th class="@(isToday ? "is-today" : "")">
+                            @shortDays[i % 7]
+                            <div><small class="muted">@d.ToString("MMM d")</small></div>
+                        </th>
+                    }
+                    @if (Model.WeeksSpan == 1)
+                    {
+                        <th>Total</th>
+                    }
+                </tr>
+            </thead>
+            <tbody>
+                @if (Model.Rows.Count == 0)
+                {
+                    <tr><td colspan="@(totalDays + 2)" class="muted">No matching records in this range.</td></tr>
+                }
+                else
+                {
+                    foreach (var wr in Model.Rows)
+                    {
+                        <tr>
+                            <td><strong>@wr.User.FullName</strong></td>
+                            @for (var i = 0; i < totalDays; i++)
+                            {
+                                var att = wr.Days[i];
+                                var d = Model.WeekStart.AddDays(i);
+                                var isToday = d == PhTime.Today;
+                                <td class="@(isToday ? "is-today" : "")">
+                                    @if (att is null)
+                                    {
+                                        <span class="muted">&mdash;</span>
+                                    }
+                                    else if (att.IsOpen)
+                                    {
+                                        <div>@UserClock.Format(viewer, att.CheckIn, "HH:mm")</div>
+                                        <span class="badge badge-active">Working</span>
+                                    }
+                                    else
+                                    {
+                                        <div>@UserClock.Format(viewer, att.CheckIn, "HH:mm")&ndash;@UserClock.Format(viewer, att.CheckOut, "HH:mm")</div>
+                                        <small class="muted">@PhTime.FormatDurationMinutes(att.DurationMinutes)</small>
+                                    }
+                                </td>
+                            }
+                            <td>
+                                <strong>@wr.PresentDays d</strong>
+                                <div><small class="muted">@PhTime.FormatDurationMinutes(wr.TotalMinutes)</small></div>
+                            </td>
+                        </tr>
+                    }
+                }
+            </tbody>
+        </table>
+    </div>
+</section>

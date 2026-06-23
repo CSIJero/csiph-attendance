@@ -1,0 +1,338 @@
+@model AttendanceHistoryViewModel
+@{
+    ViewData["Title"] = $"Attendance · {Model.Target.FullName}";
+    var viewingSelf = Context.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value
+        == Model.Target.Id.ToString();
+}
+
+<section class="hero">
+    <div>
+        <h1>Attendance history</h1>
+        <p class="muted">
+            Showing
+            @if (Model.StartDate is not null || Model.EndDate is not null)
+            {
+                <text>records</text>
+                @if (Model.StartDate is { } s)
+                {
+                    <text> from <strong>@s.ToString("yyyy-MM-dd")</strong></text>
+                }
+                @if (Model.EndDate is { } e)
+                {
+                    <text> to <strong>@e.ToString("yyyy-MM-dd")</strong></text>
+                }
+            }
+            else
+            {
+                <text>the latest 200 records</text>
+            }
+            for <strong>@Model.Target.FullName</strong>
+            @if (!string.IsNullOrEmpty(Model.Target.EmployeeId))
+            {
+                <span class="muted">(@Model.Target.EmployeeId)</span>
+            }.
+        </p>
+    </div>
+    <div class="hero-actions">
+        <a class="btn btn-primary"
+           asp-controller="Attendance"
+           asp-action="ExportCsv"
+           asp-route-user_id="@Model.Target.Id"
+           asp-route-start="@(Model.StartDate?.ToString("yyyy-MM-dd"))"
+           asp-route-end="@(Model.EndDate?.ToString("yyyy-MM-dd"))"
+           data-confirm="Download attendance records for @Model.Target.FullName as CSV? The download uses the date filters currently selected.">
+            Download CSV
+        </a>
+    </div>
+</section>
+
+<section class="card">
+    <div class="card-header">
+        <h2>Filters</h2>
+    </div>
+    <form method="get" asp-controller="Attendance" asp-action="Index" class="filter-row">
+        @if (Model.ViewerIsAdmin && Model.AllUsers.Count > 0)
+        {
+            <label class="inline-label">User
+                <select name="user_id">
+                    @foreach (var u in Model.AllUsers)
+                    {
+                        var selected = u.Id == Model.Target.Id;
+                        <option value="@u.Id" selected="@selected">
+                            @u.FullName@(string.IsNullOrEmpty(u.EmployeeId) ? "" : $" ({u.EmployeeId})")
+                        </option>
+                    }
+                </select>
+            </label>
+        }
+        <label class="inline-label">From
+            <input type="date" name="start" value="@(Model.StartDate?.ToString("yyyy-MM-dd"))" />
+        </label>
+        <label class="inline-label">To
+            <input type="date" name="end" value="@(Model.EndDate?.ToString("yyyy-MM-dd"))" />
+        </label>
+        <button type="submit" class="btn btn-primary">Apply</button>
+        <a class="btn btn-ghost"
+           asp-controller="Attendance"
+           asp-action="Index"
+           asp-route-user_id="@(Model.ViewerIsAdmin ? (int?)Model.Target.Id : null)">Reset</a>
+    </form>
+</section>
+
+<section class="card">
+    <div class="card-header">
+        <h2>Records</h2>
+        <small class="muted">@Model.Records.Count row@(Model.Records.Count == 1 ? "" : "s")</small>
+    </div>
+    <div class="table-wrap">
+        <table class="data-table sortable">
+            <thead>
+                <tr>
+                    <th>Date</th>
+                    <th>Check-in</th>
+                    <th>Check-out</th>
+                    <th>Hours Rendered</th>
+                    <th>OT / UT</th>
+                    <th>Status</th>
+                    <th>Attendance Status</th>
+                    <th>Remarks</th>
+                    <th data-no-sort>Selfies</th>
+                    @if (Model.ViewerIsAdmin)
+                    {
+                        <th style="width:90px;">Actions</th>
+                    }
+                    else if (viewingSelf)
+                    {
+                        <th style="width:140px;">Actions</th>
+                    }
+                </tr>
+            </thead>
+            <tbody>
+                @if (Model.Records.Count == 0)
+                {
+                    <tr>
+                        <td colspan="@(Model.ViewerIsAdmin || viewingSelf ? 10 : 9)" class="muted">No attendance records match the current filters.</td>
+                    </tr>
+                }
+                else
+                {
+                    foreach (var r in Model.Records)
+                    {
+                        Model.PendingRequestsByAttendance.TryGetValue(r.Id, out var pendingReq);
+                        Model.ScheduleByDate.TryGetValue(r.WorkDate, out var schForDed);
+                        var rowDurationMin = r.DurationMinutes;
+                        var targetTz = UserClock.Label(Model.Target);
+                        <tr>
+                            <td>@r.WorkDate.ToString("yyyy-MM-dd")</td>
+                            <td>@UserClock.Format(Model.Target, r.CheckIn, "HH:mm") @targetTz</td>
+                            <td>
+                                @if (r.CheckOut is not null)
+                                {
+                                    @($"{UserClock.Format(Model.Target, r.CheckOut, "HH:mm")} {targetTz}")
+                                }
+                                else
+                                {
+                                    <span class="muted">—</span>
+                                }
+                            </td>
+                            <td>
+                                @if (r.CheckOut is not null)
+                                {
+                                    @PhTime.FormatDurationMinutes(rowDurationMin)
+                                }
+                                else
+                                {
+                                    <span class="muted">in progress</span>
+                                }
+                            </td>
+                            <td>
+                                @{
+                                    var sch = schForDed;
+                                    var scheduledMin = sch?.ScheduledMinutes ?? 0;
+                                    var variance = PhTime.FormatVariance(
+                                        rowDurationMin, scheduledMin, r.IsOpen);
+                                }
+                                @if (string.IsNullOrEmpty(variance))
+                                {
+                                    <span class="muted">—</span>
+                                }
+                                else if (variance.StartsWith("+"))
+                                {
+                                    <span class="badge badge-ot" title="Worked @PhTime.FormatDurationMinutes(rowDurationMin) vs scheduled @PhTime.FormatDurationMinutes(scheduledMin)">@variance</span>
+                                }
+                                else if (variance.StartsWith("-"))
+                                {
+                                    <span class="badge badge-ut" title="Worked @PhTime.FormatDurationMinutes(rowDurationMin) vs scheduled @PhTime.FormatDurationMinutes(scheduledMin)">@variance</span>
+                                }
+                                else
+                                {
+                                    <span class="badge badge-done" title="Worked @PhTime.FormatDurationMinutes(rowDurationMin) vs scheduled @PhTime.FormatDurationMinutes(scheduledMin)">@variance</span>
+                                }
+                            </td>
+                            <td>
+                                @if (r.IsOpen)
+                                {
+                                    <span class="badge badge-active">Open</span>
+                                }
+                                else
+                                {
+                                    <span class="badge badge-done">Closed</span>
+                                }
+                                @if (pendingReq is not null)
+                                {
+                                    <br />
+                                    <span class="badge badge-pending"
+                                          title="Edit request submitted @UserClock.Format(Model.Target, pendingReq.RequestedAt, "yyyy-MM-dd HH:mm") @targetTz">
+                                        Edit pending
+                                    </span>
+                                }
+                            </td>
+                            <td>
+                                @{
+                                    // Schedule-based attendance status:
+                                    //   - Open row -> "Incomplete" (still working)
+                                    //   - Closed row on a scheduled day where the worked
+                                    //     duration falls short of the scheduled hours
+                                    //     -> "Incomplete Hours"
+                                    //   - Otherwise -> "Complete"
+                                    string statusLabel;
+                                    string statusBadge;
+                                    if (r.IsOpen)
+                                    {
+                                        statusLabel = "Incomplete";
+                                        statusBadge = "badge-pending";
+                                    }
+                                    else if (sch is { IsWorking: true }
+                                             && sch.ScheduledMinutes > 0
+                                             && rowDurationMin + 1 < sch.ScheduledMinutes)
+                                    {
+                                        statusLabel = "Incomplete Hours";
+                                        statusBadge = "badge-ut";
+                                    }
+                                    else
+                                    {
+                                        statusLabel = "Complete";
+                                        statusBadge = "badge-done";
+                                    }
+                                }
+                                <span class="badge @statusBadge">@statusLabel</span>
+                            </td>
+                            <td>
+                                @{
+                                    Model.ApprovedLeavesByDate.TryGetValue(r.WorkDate, out var lv);
+                                }
+                                @if (lv is not null)
+                                {
+                                    <span class="badge badge-info"
+                                          title="@(string.IsNullOrWhiteSpace(lv.Reason) ? "Approved leave" : lv.Reason)">
+                                        Approved leave: @lv.LeaveType (@lv.HoursPerDay h)
+                                    </span>
+                                }
+                                else
+                                {
+                                    <span class="muted">—</span>
+                                }
+                            </td>
+                            <td>
+                                <div style="display:flex;gap:6px;align-items:center;">
+                                    @if (!string.IsNullOrEmpty(r.CheckInPhoto))
+                                    {
+                                        <img src="@r.CheckInPhoto"
+                                             class="selfie-thumb"
+                                             alt="Check-in selfie"
+                                             title="Check-in selfie"
+                                             data-selfie-zoom />
+                                    }
+                                    else
+                                    {
+                                        <span class="selfie-thumb-empty" title="No check-in photo">—</span>
+                                    }
+                                    @if (!string.IsNullOrEmpty(r.CheckOutPhoto))
+                                    {
+                                        <img src="@r.CheckOutPhoto"
+                                             class="selfie-thumb"
+                                             alt="Check-out selfie"
+                                             title="Check-out selfie"
+                                             data-selfie-zoom />
+                                    }
+                                    else if (r.CheckOut is not null)
+                                    {
+                                        <span class="selfie-thumb-empty" title="No check-out photo">—</span>
+                                    }
+                                </div>
+                            </td>
+                            @if (Model.ViewerIsAdmin)
+                            {
+                                <td>
+                                    <a class="btn btn-ghost btn-sm"
+                                       asp-controller="Attendance"
+                                       asp-action="Edit"
+                                       asp-route-id="@r.Id">Edit</a>
+                                </td>
+                            }
+                            else if (viewingSelf)
+                            {
+                                <td>
+                                    @if (pendingReq is not null)
+                                    {
+                                        <a class="btn btn-ghost btn-sm"
+                                           asp-controller="Attendance"
+                                           asp-action="RequestEdit"
+                                           asp-route-id="@r.Id"
+                                           title="A request is already pending review. Click to amend it.">
+                                            Amend request
+                                        </a>
+                                    }
+                                    else
+                                    {
+                                        <a class="btn btn-ghost btn-sm"
+                                           asp-controller="Attendance"
+                                           asp-action="RequestEdit"
+                                           asp-route-id="@r.Id"
+                                           title="Submit a correction for your PM / admin to approve.">
+                                            Request edit
+                                        </a>
+                                    }
+                                </td>
+                            }
+                        </tr>
+                    }
+                }
+            </tbody>
+        </table>
+    </div>
+</section>
+
+<div class="selfie-lightbox" id="selfie-lightbox" hidden>
+    <img id="selfie-lightbox-img" src="" alt="Selfie preview" />
+</div>
+
+@section Scripts {
+    <script>
+        (function () {
+            const lb = document.getElementById("selfie-lightbox");
+            const lbImg = document.getElementById("selfie-lightbox-img");
+            if (!lb || !lbImg) return;
+            document.addEventListener("click", (e) => {
+                const thumb = e.target.closest("[data-selfie-zoom]");
+                if (thumb) {
+                    lbImg.src = thumb.getAttribute("src");
+                    lb.hidden = false;
+                    return;
+                }
+                // Only the dim backdrop closes the lightbox. Clicking the
+                // image itself shouldn't dismiss it (you're trying to look at it).
+                if (!lb.hidden && e.target === lb) {
+                    lb.hidden = true;
+                    lbImg.removeAttribute("src");
+                }
+            });
+            document.addEventListener("keydown", (e) => {
+                if (!lb.hidden && e.key === "Escape") {
+                    lb.hidden = true;
+                    lbImg.removeAttribute("src");
+                }
+            });
+        })();
+    </script>
+}

@@ -1,0 +1,471 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Users – Attendance Monitoring</title>
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="stylesheet" href="/css/style.css?v=jAt9DtqGaoG3No1jCRUvSgUQw5ccUOM4yWi8wbXs_Fk" />
+</head>
+<body>
+        <div class="app-shell">
+            <button type="button" class="sidebar-backdrop" id="sidebar-backdrop"
+                    aria-label="Close navigation"></button>
+
+            <aside class="sidebar" id="sidebar" aria-label="Primary navigation">
+                <div class="sidebar-header">
+                    <a class="brand-link" href="/Dashboard">
+                        <img src="/images/logo-mark.svg" alt="CSI Interfusion" class="brand-logo" />
+                        <span class="brand-text">
+                            <strong>CSI Interfusion</strong>
+                            <small>Attendance Monitor</small>
+                        </span>
+                    </a>
+                </div>
+
+                <div class="sidebar-section-label">Navigation</div>
+                <nav class="sidebar-nav">
+                    <a class="nav-link" href="/Dashboard">Dashboard</a>
+                        <a class="nav-link" href="/reports">Reports</a>
+                        <a class="nav-link" href="/schedule">Schedules</a>
+                        <a class="nav-link nav-users" href="/attendance/edit-requests">
+                            <text>Requests</text>
+                        </a>
+                        <a class="nav-link active nav-users" href="/Users">
+                            <text>Users</text>
+                        </a>
+                        <a class="nav-link" href="/violations">
+                            <text>Violations</text>
+                        </a>
+                            <a class="nav-link" href="/Roles">Configuration</a>
+                            <a class="nav-link" href="/settings">Settings</a>
+                </nav>
+
+                <div class="sidebar-footer">
+                    <a class="user-pill" title="View your profile" href="/profile">
+                        <span class="dot dot-online" id="self-status-dot"></span>
+                        System Administrator
+                        <small>(admin)</small>
+                    </a>
+                    <div class="sidebar-account-links">
+                        <a class="nav-link" href="/profile">Profile</a>
+                        <a class="nav-link" href="/Account/ChangePassword">
+                            Change password
+                        </a>
+                    </div>
+                    <form method="post" class="inline" action="/Account/Logout">
+                        
+                        <button type="submit" class="btn btn-ghost">Logout</button>
+                    <input name="__RequestVerificationToken" type="hidden" value="CfDJ8MYJoRw5nZZMokVxNmdcbQPaMu-zTy-3E7lZrwQ-G_gyPI6rgBVTAjLHjAAH3yTczGOGRGpbqOfUt8mA0bcFPus5DXxd-0t1iFa8Y1zlXZztMCP0ScXLxmfwB8dpfownvGx1NsklLgIWeC5vAyOVt-K2QinfK5g9vGGSv6gzjzOWHvsV5tpf2nQ2Cwfvsi2zzA" /></form>
+                </div>
+            </aside>
+
+            <div class="app-main">
+                <header class="app-topbar">
+                    <div class="topbar-left">
+                        <button type="button" class="sidebar-toggle" id="sidebar-toggle"
+                                aria-label="Toggle navigation" aria-controls="sidebar">
+                            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"
+                                 fill="none" stroke="currentColor" stroke-width="2"
+                                 stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                                <line x1="3" y1="6" x2="21" y2="6"></line>
+                                <line x1="3" y1="12" x2="21" y2="12"></line>
+                                <line x1="3" y1="18" x2="21" y2="18"></line>
+                            </svg>
+                        </button>
+                        <h1 class="page-title">Users</h1>
+                    </div>
+                </header>
+
+                <main class="container">
+                        <div class="flashes">
+                                <div class="flash flash-success">Welcome back, System Administrator!</div>
+                        </div>
+
+                    
+<section class="hero">
+    <div>
+        <h1>Users</h1>
+        <p class="muted">
+Manage profile details for everyone on the team. Click <strong>Edit</strong> on
+                a row to update name, email, role, business unit and more. Passwords can't
+                be changed from here.        </p>
+    </div>
+    <div class="hero-actions">
+        <a class="btn btn-primary" title="Create a user directly; skips the approval queue and is sign-in-ready." href="/Users/Create">
+            + New user
+        </a>
+    </div>
+</section>
+
+
+<section class="card">
+    <div class="card-header">
+        <h2>All accounts</h2>
+        <small class="muted">1 total</small>
+    </div>
+    <div class="table-wrap">
+        <table class="data-table sortable">
+            <thead>
+                <tr>
+                    <th>Name</th>
+                    <th>Username</th>
+                    <th>Email</th>
+                    <th>Employee ID</th>
+                    <th>Business Unit</th>
+                    <th>Role label</th>
+                    <th>Assigned PM</th>
+                    <th>Role</th>
+                    <th style="width:130px;" data-no-sort></th>
+                </tr>
+            </thead>
+            <tbody>
+                        <tr>
+                            <td><strong>System Administrator</strong></td>
+                            <td>admin</td>
+                            <td>admin@example.com</td>
+                            <td>
+                                    <span class="muted">&mdash;</span>
+                            </td>
+                            <td>
+                                    <span class="muted">&mdash;</span>
+                            </td>
+                            <td>
+                                    <span class="muted">&mdash;</span>
+                            </td>
+                            <td>
+                                    <span class="muted">&mdash;</span>
+                            </td>
+                            <td>
+                                admin
+                            </td>
+                            <td>
+                                <div class="icon-actions">
+                                    <a class="icon-btn icon-btn-edit" title="Edit user" aria-label="Edit System Administrator" href="/Users/Edit/1">
+                                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                             stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
+                                             aria-hidden="true">
+                                            <path d="M12 20h9" />
+                                            <path d="M16.5 3.5a2.121 2.121 0 1 1 3 3L7 19l-4 1 1-4 12.5-12.5z" />
+                                        </svg>
+                                    </a>
+                                    <form method="post" class="inline" onsubmit="return confirm('Generate a new temporary password for System Administrator? Their current password will stop working.');" action="/Users/ResetPassword/1">
+                                        
+                                        <button type="submit" class="icon-btn icon-btn-key"
+                                                title="Reset password" aria-label="Reset password for System Administrator">
+                                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                                 stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
+                                                 aria-hidden="true">
+                                                <circle cx="7.5" cy="15.5" r="3.5" />
+                                                <path d="M10 13l10-10" />
+                                                <path d="M16 7l3 3" />
+                                                <path d="M14 9l3 3" />
+                                            </svg>
+                                        </button>
+                                    <input name="__RequestVerificationToken" type="hidden" value="CfDJ8MYJoRw5nZZMokVxNmdcbQPaMu-zTy-3E7lZrwQ-G_gyPI6rgBVTAjLHjAAH3yTczGOGRGpbqOfUt8mA0bcFPus5DXxd-0t1iFa8Y1zlXZztMCP0ScXLxmfwB8dpfownvGx1NsklLgIWeC5vAyOVt-K2QinfK5g9vGGSv6gzjzOWHvsV5tpf2nQ2Cwfvsi2zzA" /></form>
+                                </div>
+                            </td>
+                        </tr>
+            </tbody>
+        </table>
+    </div>
+</section>
+
+<div class="modal-backdrop" id="approve-modal" hidden aria-hidden="true">
+    <div class="modal" role="dialog" aria-labelledby="approve-modal-title" aria-modal="true" style="width:min(560px, 100%);">
+        <header class="modal-header">
+            <div>
+                <h3 id="approve-modal-title">Approve user</h3>
+                <small class="muted" id="approve-modal-subtitle">Pick a role and assignment, then approve.</small>
+            </div>
+            <button type="button" class="modal-close" data-approve-cancel aria-label="Close">&times;</button>
+        </header>
+        <form id="approve-form" method="post" action="/Users/Approve">
+            
+            <input type="hidden" name="id" id="approve-user-id" />
+            <div class="modal-body">
+                <label class="field-block">
+                    <span class="field-label">Role <span class="req">*</span></span>
+                    <select name="roleLabelId" id="approve-role-select" required>
+                            <option value="1" data-base-role="admin">Administrator</option>
+                            <option value="4" data-base-role="employee">Employee</option>
+                            <option value="2" data-base-role="program_manager">Program Manager</option>
+                            <option value="3" data-base-role="pm">Project Manager</option>
+                    </select>
+                    <input type="hidden" name="role" id="approve-role-hidden" value="employee" />
+                </label>
+
+                <div class="field-block" data-approve-show="employee" hidden>
+                    <label>
+                        <span class="field-label">Assigned to (Project Manager) <small class="muted">(optional)</small></span>
+                        <select name="managerId" data-approve-mgr="employee">
+                            <option value="">— No PM —</option>
+                                <option value="1">
+                                    System Administrator (Administrator)
+                                </option>
+                        </select>
+                    </label>
+                    <label>
+                        <span class="field-label">Business Unit <small class="muted">(optional)</small></span>
+                        <select name="businessUnit" data-approve-bu>
+                            <option value="">— Keep current —</option>
+                                <option value="BU1">BU1</option>
+                                <option value="BU2 (PH)">BU2 (PH)</option>
+                                <option value="BU2 (IN)">BU2 (IN)</option>
+                                <option value="BU3 (PH)">BU3 (PH)</option>
+                                <option value="BU3 (IN)">BU3 (IN)</option>
+                                <option value="BU4 (PH)">BU4 (PH)</option>
+                                <option value="BU4 (IN)">BU4 (IN)</option>
+                        </select>
+                    </label>
+                </div>
+
+                <div class="field-block" data-approve-show="pm" hidden>
+                    <label>
+                        <span class="field-label">Assigned to (Program Manager) <small class="muted">(optional)</small></span>
+                        <select name="managerId" data-approve-mgr="pm" disabled>
+                            <option value="">— No Program Manager —</option>
+                                <option value="1">
+                                    System Administrator (Administrator)
+                                </option>
+                        </select>
+                    </label>
+                </div>
+
+                <div class="field-block" data-approve-show="program_manager" hidden>
+                    <span class="field-label">Business Units <span class="req">*</span></span>
+                    <div class="bu-multi">
+                            <label class="checkbox-row">
+                                <input type="checkbox" class="approve-bu-multi" value="BU1" />
+                                <span>BU1</span>
+                            </label>
+                            <label class="checkbox-row">
+                                <input type="checkbox" class="approve-bu-multi" value="BU2 (PH)" />
+                                <span>BU2 (PH)</span>
+                            </label>
+                            <label class="checkbox-row">
+                                <input type="checkbox" class="approve-bu-multi" value="BU2 (IN)" />
+                                <span>BU2 (IN)</span>
+                            </label>
+                            <label class="checkbox-row">
+                                <input type="checkbox" class="approve-bu-multi" value="BU3 (PH)" />
+                                <span>BU3 (PH)</span>
+                            </label>
+                            <label class="checkbox-row">
+                                <input type="checkbox" class="approve-bu-multi" value="BU3 (IN)" />
+                                <span>BU3 (IN)</span>
+                            </label>
+                            <label class="checkbox-row">
+                                <input type="checkbox" class="approve-bu-multi" value="BU4 (PH)" />
+                                <span>BU4 (PH)</span>
+                            </label>
+                            <label class="checkbox-row">
+                                <input type="checkbox" class="approve-bu-multi" value="BU4 (IN)" />
+                                <span>BU4 (IN)</span>
+                            </label>
+                    </div>
+                    <input type="hidden" name="businessUnits" id="approve-bu-multi-hidden" />
+                    <small class="muted">Program Managers see every user whose BU is in this list (e.g. BU2 (PH) + BU2 (IN)).</small>
+                </div>
+            </div>
+            <footer class="modal-footer selfie-actions" style="padding:14px 22px;border-top:1px solid var(--border);display:flex;gap:8px;justify-content:flex-end;">
+                <button type="button" class="btn btn-ghost" data-approve-cancel>Cancel</button>
+                <button type="submit" class="btn btn-success">Approve</button>
+            </footer>
+        <input name="__RequestVerificationToken" type="hidden" value="CfDJ8MYJoRw5nZZMokVxNmdcbQPaMu-zTy-3E7lZrwQ-G_gyPI6rgBVTAjLHjAAH3yTczGOGRGpbqOfUt8mA0bcFPus5DXxd-0t1iFa8Y1zlXZztMCP0ScXLxmfwB8dpfownvGx1NsklLgIWeC5vAyOVt-K2QinfK5g9vGGSv6gzjzOWHvsV5tpf2nQ2Cwfvsi2zzA" /></form>
+    </div>
+</div>
+
+<script>
+    (function () {
+        // Lightweight approve-modal controller. Plain JS, no deps; reuses
+        // the .modal-backdrop / .modal CSS already in style.css. Mirrors
+        // the wiring in _SelfieModal.cshtml so behavior is consistent.
+        // The Role <select> now posts the RoleDefinition Id (roleLabelId);
+        // we read the selected option's data-base-role attribute to drive
+        // the rest of the form (canonical permission tier).
+        var backdrop = document.getElementById('approve-modal');
+        if (!backdrop) return;
+        var form = document.getElementById('approve-form');
+        var idInput = document.getElementById('approve-user-id');
+        var subtitle = document.getElementById('approve-modal-subtitle');
+        var roleSelect = document.getElementById('approve-role-select');
+        var roleHidden = document.getElementById('approve-role-hidden');
+        var buHidden = document.getElementById('approve-bu-multi-hidden');
+        var sections = backdrop.querySelectorAll('[data-approve-show]');
+
+        function currentBaseRole() {
+            var opt = roleSelect.options[roleSelect.selectedIndex];
+            return (opt && opt.getAttribute('data-base-role')) || 'employee';
+        }
+
+        function syncRoleHidden() {
+            if (roleHidden) roleHidden.value = currentBaseRole();
+        }
+
+        function syncSections() {
+            var role = currentBaseRole();
+            sections.forEach(function (sec) {
+                var show = sec.getAttribute('data-approve-show') === role;
+                sec.hidden = !show;
+                // Disable inputs in hidden sections so they don't post.
+                sec.querySelectorAll('input, select').forEach(function (el) {
+                    el.disabled = !show;
+                });
+            });
+        }
+
+        function open(trigger) {
+            idInput.value = trigger.getAttribute('data-user-id') || '';
+            subtitle.textContent = 'Approving ' + (trigger.getAttribute('data-full-name') || 'user') + '.';
+            // Pre-select the role definition whose BaseRole matches the
+            // role the user registered with (typically "employee"). The
+            // dropdown is now keyed by RoleDefinition.Id, so we have to
+            // hunt for a matching option instead of setting value directly.
+            var initialRole = (trigger.getAttribute('data-role') || 'employee').toLowerCase();
+            var matched = false;
+            for (var i = 0; i < roleSelect.options.length; i++) {
+                var opt = roleSelect.options[i];
+                if ((opt.getAttribute('data-base-role') || '') === initialRole) {
+                    roleSelect.selectedIndex = i;
+                    matched = true;
+                    break;
+                }
+            }
+            if (!matched && roleSelect.options.length > 0) {
+                roleSelect.selectedIndex = 0;
+            }
+            syncRoleHidden();
+            // Pre-fill single-BU dropdown with the user's existing BU
+            // when present so the admin doesn't lose context on approve.
+            var existingBu = trigger.getAttribute('data-business-unit') || '';
+            var buSelect = backdrop.querySelector('[data-approve-bu]');
+            if (buSelect) {
+                buSelect.value = existingBu;
+            }
+            // Reset multi-BU checkboxes.
+            backdrop.querySelectorAll('.approve-bu-multi').forEach(function (c) { c.checked = false; });
+            buHidden.value = '';
+            syncSections();
+            backdrop.hidden = false;
+            backdrop.setAttribute('aria-hidden', 'false');
+            document.body.classList.add('modal-open');
+        }
+
+        function close() {
+            backdrop.hidden = true;
+            backdrop.setAttribute('aria-hidden', 'true');
+            document.body.classList.remove('modal-open');
+        }
+
+        document.querySelectorAll('.js-approve-trigger').forEach(function (btn) {
+            btn.addEventListener('click', function () { open(btn); });
+        });
+        backdrop.querySelectorAll('[data-approve-cancel]').forEach(function (el) {
+            el.addEventListener('click', close);
+        });
+        backdrop.addEventListener('click', function (e) {
+            if (e.target === backdrop) close();
+        });
+        roleSelect.addEventListener('change', function () {
+            syncRoleHidden();
+            syncSections();
+        });
+
+        form.addEventListener('submit', function (e) {
+            // Roll the checked BU boxes up into a semicolon list before
+            // posting, since checkboxes don't natively post a CSV.
+            if (currentBaseRole() === 'program_manager') {
+                var picked = [];
+                backdrop.querySelectorAll('.approve-bu-multi:checked').forEach(function (c) {
+                    picked.push(c.value);
+                });
+                if (picked.length === 0) {
+                    e.preventDefault();
+                    alert('Please pick at least one Business Unit for the Program Manager.');
+                    return;
+                }
+                buHidden.value = picked.join(';');
+                buHidden.disabled = false;
+            }
+        });
+    })();
+</script>
+
+                </main>
+
+                <footer class="footer">
+                    <small>
+                        Online threshold: 60 s
+                        &middot; Server time:
+                        <span id="server-time">2026-05-18 11:57 PHT</span>
+                    </small>
+                </footer>
+            </div>
+        </div>
+
+<div class="modal-backdrop selfie-modal-backdrop" id="selfie-modal" hidden aria-hidden="true">
+    <div class="modal selfie-modal" role="dialog" aria-labelledby="selfie-modal-title" aria-modal="true">
+        <header class="modal-header">
+            <div>
+                <h3 id="selfie-modal-title">Take a selfie</h3>
+                <small class="muted" id="selfie-modal-subtitle">
+                    Look at the camera, then click <strong>Capture</strong>.
+                </small>
+            </div>
+            <button type="button" class="modal-close" data-selfie-cancel aria-label="Close">&times;</button>
+        </header>
+
+        <div class="selfie-stage">
+            <video id="selfie-video" autoplay playsinline muted></video>
+            <canvas id="selfie-canvas" hidden></canvas>
+            <img id="selfie-preview" alt="Captured selfie preview" hidden />
+            <div class="selfie-overlay" id="selfie-overlay">
+                <div class="selfie-frame" aria-hidden="true"></div>
+                <p class="muted" id="selfie-status">Starting camera&hellip;</p>
+            </div>
+        </div>
+
+        <footer class="modal-footer selfie-actions">
+            <button type="button" class="btn btn-ghost" data-selfie-cancel>Cancel</button>
+            <button type="button" class="btn btn-secondary" id="selfie-retake" hidden>Retake</button>
+            <button type="button" class="btn btn-primary" id="selfie-capture">Capture</button>
+            <button type="button" class="btn btn-primary" id="selfie-confirm" hidden>Use photo &amp; submit</button>
+        </footer>
+    </div>
+</div>
+        <script src="/js/app.js?v=gGgSvTdl3_ibCF1VNzeGkZScRmGWWxdH1svC8vA8JiA"></script>
+        <script src="/js/selfie.js?v=YbOtJZWMW2qV2yEpkhGQjelk_orI1jTbpGvCTVxXQYA"></script>
+        <script>
+            (function () {
+                var sidebar = document.getElementById('sidebar');
+                var toggle = document.getElementById('sidebar-toggle');
+                var backdrop = document.getElementById('sidebar-backdrop');
+                if (!sidebar || !toggle) return;
+                function close() {
+                    sidebar.classList.remove('is-open');
+                    if (backdrop) backdrop.classList.remove('is-visible');
+                }
+                function open() {
+                    sidebar.classList.add('is-open');
+                    if (backdrop) backdrop.classList.add('is-visible');
+                }
+                toggle.addEventListener('click', function () {
+                    if (sidebar.classList.contains('is-open')) close(); else open();
+                });
+                if (backdrop) backdrop.addEventListener('click', close);
+                // Close after navigating (sidebar links).
+                sidebar.querySelectorAll('a.nav-link').forEach(function (a) {
+                    a.addEventListener('click', function () {
+                        if (window.matchMedia('(max-width: 880px)').matches) close();
+                    });
+                });
+                window.addEventListener('keydown', function (e) {
+                    if (e.key === 'Escape') close();
+                });
+            })();
+        </script>
+    <script src="/js/table-sort.js?v=XBAHAp3dEN4KuBtlNEUP3c_QQdsvL1B8c8m2LBZccCg"></script>
+    
+</body>
+</html>

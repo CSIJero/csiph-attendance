@@ -1,0 +1,419 @@
+@using AttendanceMonitoring.Services
+@using AttendanceMonitoring.Models
+@model AttendanceMonitoring.ViewModels.ViolationsIndexViewModel
+@{
+    ViewData["Title"] = "Reminders";
+    var viewer = ViewData["ViewerUser"] as User;
+    var tz = (ViewData["TzLabel"] as string) ?? "PHT";
+    var viewerOffset = UserClock.DisplayOffset(viewer);
+    DateTime ToViewerLocal(DateTime utc)
+    {
+        var v = utc.Kind == DateTimeKind.Unspecified
+            ? DateTime.SpecifyKind(utc, DateTimeKind.Utc) : utc;
+        return new DateTimeOffset(v).ToOffset(viewerOffset).DateTime;
+    }
+
+    string TabCls(string key) => Model.Filter == key ? "subtab subtab-active" : "subtab";
+    string ClosedTabCls() => Model.Filter == "closed"
+        ? "subtab subtab-active subtab-closed-active"
+        : "subtab";
+}
+
+<section class="hero">
+    <div>
+        <h1>Reminders</h1>
+        <p class="muted">
+            Investigation queue for 1-hour offline incidents. Start an
+            investigation to request employee explanation, review the
+            conversation thread, then close or override.
+        </p>
+    </div>
+</section>
+
+<nav class="subtabs" aria-label="Reminders filter">
+    <a class="@TabCls("pending")" asp-controller="Violations" asp-action="Index" asp-route-filter="pending">
+        <span>Pending</span>
+        @if (Model.PendingCount > 0)
+        {
+            <span class="subtab-badge" title="@Model.PendingCount pending">@Model.PendingCount</span>
+        }
+    </a>
+    <a class="@TabCls("investigate")" asp-controller="Violations" asp-action="Index" asp-route-filter="investigate">
+        <span>Investigate</span>
+        @if (Model.InvestigateCount > 0)
+        {
+            <span class="subtab-badge" title="@Model.InvestigateCount under investigation">@Model.InvestigateCount</span>
+        }
+    </a>
+    <a class="@ClosedTabCls()" asp-controller="Violations" asp-action="Index" asp-route-filter="closed">
+        <span>Closed</span>
+        @if (Model.ClosedCount > 0)
+        {
+            <span class="subtab-badge" title="@Model.ClosedCount closed items">@Model.ClosedCount</span>
+        }
+    </a>
+    <a class="@TabCls("all")" asp-controller="Violations" asp-action="Index" asp-route-filter="all">
+        <span>All</span>
+    </a>
+</nav>
+
+<section class="card">
+    <div class="card-header">
+        <h2>
+            @if (Model.Filter == "pending")
+            {
+                <text>Pending reminders</text>
+            }
+            else if (Model.Filter == "investigate")
+            {
+                <text>Investigations in progress</text>
+            }
+            else if (Model.Filter == "closed" || Model.Filter == "actioned" || Model.Filter == "needaction")
+            {
+                <text>Closed reminders (no action needed)</text>
+            }
+            else
+            {
+                <text>All reminders</text>
+            }
+        </h2>
+        <small class="muted">@Model.Rows.Count row@(Model.Rows.Count == 1 ? "" : "s") (latest 500)</small>
+    </div>
+
+    @if (Model.Rows.Count == 0)
+    {
+        <p class="muted">No matching reminders.</p>
+    }
+    else
+    {
+        @* Bulk-action form wraps the table so the per-row checkboxes can
+           be submitted in one POST. The note + action buttons are
+           outside the per-row <form> in the Action column \u2014 picking
+           "Warning" / "Override" / "Clear" up here applies to every
+           checked row. *@
+        <form method="post"
+              asp-controller="Violations" asp-action="BulkAct"
+              id="violations-bulk-form">
+            @Html.AntiForgeryToken()
+            <input type="hidden" name="filter" value="@Model.Filter" />
+            <div class="bulk-toolbar" id="violations-bulk-toolbar" hidden>
+                <span>
+                    <strong id="violations-bulk-count">0</strong> selected
+                </span>
+                <input type="text" name="note" maxlength="500"
+                       placeholder="Manager note (applied to all selected)"
+                       class="note-input" style="flex:1;min-width:200px;" />
+                @if (Model.Filter == "investigate")
+                {
+                    <button type="submit" name="action" value="close"
+                            class="btn btn-secondary btn-sm"
+                            onclick="return confirm('Mark all selected reminders as Closed?');">
+                        Close
+                    </button>
+                }
+                else if (Model.Filter == "closed")
+                {
+                    <span class="muted">Closed items are read-only.</span>
+                }
+                else if (Model.Filter == "pending")
+                {
+                    <button type="submit" name="action" value="investigate"
+                            class="btn btn-primary btn-sm"
+                            onclick="return confirm('Start investigation and request employee explanation for all selected reminders?');">
+                        Investigate
+                    </button>
+                    <button type="submit" name="action" value="close"
+                            class="btn btn-secondary btn-sm"
+                            onclick="return confirm('Mark all selected reminders as Closed?');">
+                        Close
+                    </button>
+                }
+                else
+                {
+                    <button type="submit" name="action" value="investigate"
+                            class="btn btn-primary btn-sm"
+                            onclick="return confirm('Start investigation and request employee explanation for all selected reminders?');">
+                        Investigate
+                    </button>
+                    <button type="submit" name="action" value="warning"
+                            class="btn btn-warn btn-sm"
+                            onclick="return confirm('Close all selected reminders as Warning?');">
+                        Close as Warning
+                    </button>
+                    <button type="submit" name="action" value="close"
+                            class="btn btn-secondary btn-sm"
+                            onclick="return confirm('Mark all selected reminders as Closed?');">
+                        Close
+                    </button>
+                    <button type="submit" name="action" value="override"
+                            class="btn btn-secondary btn-sm"
+                            onclick="return confirm('Override all selected reminders (PM right to override)?');">
+                        Override
+                    </button>
+                }
+                <button type="button" class="btn btn-ghost btn-sm"
+                        id="violations-bulk-deselect">
+                    Deselect all
+                </button>
+            </div>
+            <div class="table-wrap">
+                <table class="data-table sortable" id="violations-table">
+                    <thead>
+                        <tr>
+                            <th data-no-sort style="width:34px;">
+                                <input type="checkbox" id="violations-master-toggle"
+                                       title="Select / deselect every reminder" />
+                            </th>
+                            <th data-sort-type="date">Detected</th>
+                            <th>Employee</th>
+                            <th data-sort-type="num">Offline for</th>
+                            <th>Email status</th>
+                            <th data-no-sort>Thread</th>
+                            <th data-no-sort style="width:340px;">Action</th>
+                        </tr>
+                    </thead>
+                    @foreach (var group in Model.Rows
+                        .GroupBy(r => ToViewerLocal(r.SentAt).Date)
+                        .OrderByDescending(g => g.Key))
+                    {
+                        var groupCount = group.Count();
+                        var groupLabel = group.Key.ToString("dddd, MMM d, yyyy");
+                        var groupId = "g-" + group.Key.ToString("yyyyMMdd");
+                        <tbody data-group-id="@groupId">
+                            <tr class="group-header">
+                                <td data-no-sort>
+                                    <input type="checkbox"
+                                           class="violations-group-toggle"
+                                           data-group="@groupId"
+                                           title="Select / deselect all in @groupLabel" />
+                                </td>
+                                <td colspan="6">
+                                    <strong>@groupLabel</strong>
+                                    <small class="muted"> &middot; @groupCount reminder@(groupCount == 1 ? "" : "s")</small>
+                                </td>
+                            </tr>
+                            @foreach (var n in group.OrderByDescending(r => r.SentAt))
+                            {
+                                var hrs = n.OfflineMinutes / 60;
+                                var mins = n.OfflineMinutes % 60;
+                                var offlineLabel = hrs > 0
+                                    ? (mins == 0 ? $"{hrs}h" : $"{hrs}h {mins}m")
+                                    : $"{mins}m";
+                                var detectedSort = ToViewerLocal(n.SentAt).ToString("yyyy-MM-ddTHH:mm:ss");
+                                var employeeSort = (n.UserFullName ?? n.Username ?? "").ToLowerInvariant();
+                                var statusSort = (n.Status ?? "").ToLowerInvariant();
+                                var actionTaken = n.ActionTaken ?? string.Empty;
+                                var rowIsPending = string.IsNullOrWhiteSpace(actionTaken);
+                                var rowIsInvestigating = string.Equals(actionTaken, "Investigating", StringComparison.OrdinalIgnoreCase);
+                                var rowIsClosed = string.Equals(actionTaken, "Closed", StringComparison.OrdinalIgnoreCase)
+                                                  || string.Equals(actionTaken, "Warning", StringComparison.OrdinalIgnoreCase)
+                                                  || string.Equals(actionTaken, "Deduction", StringComparison.OrdinalIgnoreCase)
+                                                  || string.Equals(actionTaken, "Overridden", StringComparison.OrdinalIgnoreCase)
+                                                  || string.Equals(actionTaken, "ProgManApprovedOverride", StringComparison.OrdinalIgnoreCase)
+                                                  || string.Equals(actionTaken, "ProgManReview", StringComparison.OrdinalIgnoreCase)
+                                                  || string.Equals(actionTaken, "ProgManRejected", StringComparison.OrdinalIgnoreCase);
+                                <tr>
+                                    <td data-no-sort>
+                                        <input type="checkbox"
+                                               class="violations-row-toggle"
+                                               name="ids" value="@n.Id"
+                                               data-group="@groupId" />
+                                    </td>
+                                    <td data-sort="@detectedSort">
+                                        @UserClock.Format(viewer, n.SentAt, "yyyy-MM-dd HH:mm")<br />
+                                        <small class="muted">@tz</small>
+                                    </td>
+                                    <td data-sort="@employeeSort">
+                                        <strong>@(n.UserFullName ?? "\u2014")</strong><br />
+                                        <small class="muted">@(n.Username ?? "")</small>
+                                    </td>
+                                    <td data-sort="@n.OfflineMinutes">@offlineLabel</td>
+                                    <td data-sort="@statusSort">
+                                        <small class="muted">@n.Status</small>
+                                        @if (!string.IsNullOrWhiteSpace(n.ErrorMessage))
+                                        {
+                                            <br />
+                                            <small class="muted" title="@n.ErrorMessage">
+                                                @(n.ErrorMessage.Length > 60 ? n.ErrorMessage[..60] + "\u2026" : n.ErrorMessage)
+                                            </small>
+                                        }
+                                    </td>
+                                    <td>
+                                        @if (string.IsNullOrWhiteSpace(n.ActionNote))
+                                        {
+                                            <small class="muted">&mdash;</small>
+                                        }
+                                        else
+                                        {
+                                            <small style="white-space:pre-wrap;">@n.ActionNote</small>
+                                        }
+                                    </td>
+                                    <td>
+                                        @* Per-row action form lives outside the bulk-form so
+                                           submitting it doesn't carry the bulk-form checkboxes.
+                                           All action buttons sit in a single horizontal row so
+                                           Warning / Override / Clear stay visually aligned. *@
+                                        <div class="row-actions" style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;">
+                                            @if (Model.Filter != "needaction")
+                                            {
+                                                <input type="text"
+                                                       form="row-form-@n.Id"
+                                                       name="note"
+                                                       maxlength="500"
+                                                       value="@(n.ActionNote ?? "")"
+                                                       placeholder="Investigation note"
+                                                       class="note-input"
+                                                       style="min-width:180px;" />
+                                            }
+                                            @if (Model.Filter != "needaction")
+                                            {
+                                                if (Model.Filter == "investigate")
+                                                {
+                                                    <span class="muted">Investigation in progress</span>
+                                                }
+                                                else if (Model.Filter == "closed")
+                                                {
+                                                    <span class="muted">Approved - no action needed</span>
+                                                }
+                                                else if (Model.Filter == "pending")
+                                                {
+                                                    <button type="submit"
+                                                            form="row-form-@n.Id"
+                                                            name="action" value="investigate"
+                                                            class="btn btn-primary btn-sm">
+                                                        Investigate
+                                                    </button>
+                                                    <button type="submit"
+                                                            form="row-form-@n.Id"
+                                                            name="action" value="close"
+                                                            class="btn btn-secondary btn-sm">
+                                                        Close
+                                                    </button>
+                                                }
+                                                else
+                                                {
+                                                    if (rowIsInvestigating)
+                                                    {
+                                                        <button type="submit"
+                                                                form="row-form-@n.Id"
+                                                                name="action" value="close"
+                                                                class="btn btn-secondary btn-sm"
+                                                                onclick="return confirm('Mark this reminder as Closed?');">
+                                                            Close
+                                                        </button>
+                                                    }
+                                                    else if (rowIsClosed)
+                                                    {
+                                                        <span class="muted">Approved - no action needed</span>
+                                                    }
+                                                    else
+                                                    {
+                                                        <button type="submit"
+                                                                form="row-form-@n.Id"
+                                                                name="action" value="investigate"
+                                                                class="btn btn-primary btn-sm">
+                                                            Investigate
+                                                        </button>
+                                                        <button type="submit"
+                                                                form="row-form-@n.Id"
+                                                                name="action" value="close"
+                                                                class="btn btn-secondary btn-sm">
+                                                            Close
+                                                        </button>
+                                                    }
+                                                }
+                                            }
+                                            @if (Model.Filter == "investigate")
+                                            {
+                                                <button type="submit"
+                                                        form="row-form-@n.Id"
+                                                        name="action" value="close"
+                                                        class="btn btn-secondary btn-sm"
+                                                        onclick="return confirm('Mark this reminder as Closed?');">
+                                                    Close
+                                                </button>
+                                            }
+                                        </div>
+                                    </td>
+                                </tr>
+                            }
+                        </tbody>
+                    }
+                </table>
+            </div>
+        </form>
+
+        @* Per-row forms rendered OUTSIDE the bulk form so the single-row
+           action POST only carries its own note + the row's id. Buttons
+           inside the table refer back to these via the `form=` attribute. *@
+        @foreach (var n in Model.Rows)
+        {
+            <form method="post"
+                  asp-controller="Violations" asp-action="Act" asp-route-id="@n.Id"
+                  id="row-form-@n.Id" style="display:none;">
+                @Html.AntiForgeryToken()
+                <input type="hidden" name="filter" value="@Model.Filter" />
+            </form>
+        }
+
+        <script>
+            (function () {
+                'use strict';
+                var form = document.getElementById('violations-bulk-form');
+                if (!form) return;
+                var master = document.getElementById('violations-master-toggle');
+                var toolbar = document.getElementById('violations-bulk-toolbar');
+                var countEl = document.getElementById('violations-bulk-count');
+                var deselect = document.getElementById('violations-bulk-deselect');
+                var rowBoxes = form.querySelectorAll('input.violations-row-toggle');
+                var groupBoxes = form.querySelectorAll('input.violations-group-toggle');
+
+                function update() {
+                    var picked = 0;
+                    rowBoxes.forEach(function (cb) { if (cb.checked) picked++; });
+                    if (countEl) countEl.textContent = picked;
+                    if (toolbar) toolbar.hidden = picked === 0;
+                    if (master) {
+                        master.checked = picked > 0 && picked === rowBoxes.length;
+                        master.indeterminate = picked > 0 && picked < rowBoxes.length;
+                    }
+                    groupBoxes.forEach(function (gb) {
+                        var group = gb.dataset.group;
+                        var groupRows = form.querySelectorAll(
+                            'input.violations-row-toggle[data-group="' + group + '"]');
+                        var groupPicked = 0;
+                        groupRows.forEach(function (cb) { if (cb.checked) groupPicked++; });
+                        gb.checked = groupPicked > 0 && groupPicked === groupRows.length;
+                        gb.indeterminate = groupPicked > 0 && groupPicked < groupRows.length;
+                    });
+                }
+
+                rowBoxes.forEach(function (cb) {
+                    cb.addEventListener('change', update);
+                });
+                groupBoxes.forEach(function (gb) {
+                    gb.addEventListener('change', function () {
+                        var group = gb.dataset.group;
+                        var groupRows = form.querySelectorAll(
+                            'input.violations-row-toggle[data-group="' + group + '"]');
+                        groupRows.forEach(function (cb) { cb.checked = gb.checked; });
+                        update();
+                    });
+                });
+                if (master) {
+                    master.addEventListener('change', function () {
+                        rowBoxes.forEach(function (cb) { cb.checked = master.checked; });
+                        update();
+                    });
+                }
+                if (deselect) {
+                    deselect.addEventListener('click', function () {
+                        rowBoxes.forEach(function (cb) { cb.checked = false; });
+                        update();
+                    });
+                }
+                update();
+            })();
+        </script>
+    }
+</section>

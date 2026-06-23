@@ -1,0 +1,269 @@
+@model EditUserViewModel
+@{
+    ViewData["Title"] = $"Edit · {Model.FullName}";
+    var canGrantAdmin = User.IsInRole("admin");
+}
+
+<section class="hero">
+    <div>
+        <h1>Edit user</h1>
+        <p class="muted">
+            Update profile fields for <strong>@Model.FullName</strong>. Passwords are
+            not editable here &mdash; the user must reset their own password.
+        </p>
+    </div>
+    <div class="hero-actions">
+        <a asp-controller="Users" asp-action="Index" class="btn btn-ghost">&larr; Back to users</a>
+    </div>
+</section>
+
+<section class="card auth-card" style="max-width:640px;">
+    <form method="post" asp-controller="Users" asp-action="Edit"
+          asp-route-id="@Model.Id">
+        @Html.AntiForgeryToken()
+        <input type="hidden" name="Id" value="@Model.Id" />
+
+        <label>Full name
+            <input type="text" name="FullName" required maxlength="120"
+                   value="@Model.FullName" />
+        </label>
+
+        <label>Username
+            <input type="text" name="Username" required
+                   pattern="[A-Za-z0-9_.\-]{3,64}"
+                   value="@Model.Username" />
+        </label>
+
+        <label>Email
+            <input type="email" name="Email" required maxlength="120"
+                   value="@Model.Email" />
+        </label>
+
+        <label>Employee ID <small class="muted">(optional)</small>
+            <input type="text" name="EmployeeId"
+                   placeholder="e.g. E000123 or E001234"
+                   pattern="E\d{6,7}"
+                   value="@Model.EmployeeId" />
+            <small class="muted">Format: E + 6&ndash;7 digits.</small>
+        </label>
+
+        <label>Business Unit <span class="req" data-role-hide="program_manager">*</span><small class="muted" data-role-show="program_manager"> (use the multi-BU field below)</small>
+            <select name="BusinessUnit">
+                <option value="">— Select —</option>
+                @foreach (var bu in Model.BusinessUnitChoices)
+                {
+                    <option value="@bu" selected="@(string.Equals(Model.BusinessUnit, bu, StringComparison.OrdinalIgnoreCase))">@bu</option>
+                }
+            </select>
+            <small class="muted">BU2/BU3/BU4 are split by country (PH or IN) so the matching PM sees the right people. Required for Employee and Project Manager roles.</small>
+        </label>
+
+        <label data-role-show="employee,pm">Assigned to <small class="muted">(optional)</small>
+            @* Single <select> swap their option list via JS depending on the
+               currently-selected role. We render both lists and let the
+               controller below pick. *@
+            <select name="ManagerId" id="manager-select">
+                <option value="">— Not assigned —</option>
+            </select>
+            <small class="muted" id="manager-help">Employees report to a Project Manager; Project Managers report to a Program Manager.</small>
+        </label>
+
+        @* Hidden data island consumed by the role/manager script below. *@
+        <script type="application/json" id="pm-choices-data">
+            @Html.Raw(System.Text.Json.JsonSerializer.Serialize(Model.ProjectManagerChoices.Select(p => new {
+                id = p.Id,
+                label = $"{p.FullName} ({AttendanceMonitoring.Models.Roles.DisplayName(p.Role)})" + (string.IsNullOrEmpty(p.BusinessUnit) ? "" : $" · {p.BusinessUnit}")
+            })))
+        </script>
+        <script type="application/json" id="pgm-choices-data">
+            @Html.Raw(System.Text.Json.JsonSerializer.Serialize(Model.ProgramManagerChoices.Select(p => new {
+                id = p.Id,
+                label = $"{p.FullName} ({AttendanceMonitoring.Models.Roles.DisplayName(p.Role)})"
+            })))
+        </script>
+
+        <div class="field-block" id="bu-multi-block" data-role-show="program_manager" hidden>
+            <span class="field-label">Business Units <span class="req">*</span></span>
+            <div class="bu-multi">
+                @{
+                    var picked = Model.BusinessUnits?.Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToHashSet()
+                                  ?? new HashSet<string>();
+                }
+                @foreach (var bu in Model.BusinessUnitChoices)
+                {
+                    var isPicked = picked.Contains(bu);
+                    <label class="checkbox-row">
+                        <input type="checkbox" class="edit-bu-multi" value="@bu" checked="@(isPicked ? "checked" : null)" />
+                        <span>@bu</span>
+                    </label>
+                }
+            </div>
+            <input type="hidden" name="BusinessUnits" id="bu-multi-hidden" value="@Model.BusinessUnits" />
+            <small class="muted">Program Managers see every user whose BU is in this list (e.g. BU2 (PH) + BU2 (IN)).</small>
+        </div>
+
+        @{
+            // Filter role definitions so non-pure-admins can't grant
+            // admin / program_manager tiers (defense-in-depth — the
+            // controller re-checks this on POST). When the user already
+            // holds an elevated role we still include it so we don't
+            // accidentally demote them on save.
+            var roleChoices = Model.RoleLabelChoices
+                .Where(d => canGrantAdmin
+                    || (d.BaseRole != AttendanceMonitoring.Models.Roles.Admin
+                     && d.BaseRole != AttendanceMonitoring.Models.Roles.ProgramManager)
+                    || d.Id == Model.RoleLabelId
+                    || string.Equals(d.BaseRole, Model.Role, StringComparison.OrdinalIgnoreCase))
+                .ToList();
+            var selectedDefId = Model.RoleLabelId
+                ?? roleChoices.FirstOrDefault(d => string.Equals(d.BaseRole, Model.Role, StringComparison.OrdinalIgnoreCase))?.Id
+                ?? roleChoices.FirstOrDefault()?.Id;
+            var selectedDef = roleChoices.FirstOrDefault(d => d.Id == selectedDefId);
+            var initialBase = selectedDef?.BaseRole ?? Model.Role;
+        }
+        <label>Role
+            <select name="RoleLabelId" id="role-select" required>
+                @foreach (var def in roleChoices)
+                {
+                    var sel = selectedDefId == def.Id;
+                    var label = def.IsBuiltIn
+                        ? def.Name
+                        : $"{def.Name} · {AttendanceMonitoring.Models.Roles.DisplayName(def.BaseRole)} tier";
+                    <option value="@def.Id"
+                            data-base-role="@def.BaseRole"
+                            selected="@sel">@label</option>
+                }
+            </select>
+            @* Hidden canonical role mirrors the selected option's
+               data-base-role so the existing server-side validation
+               (which reads vm.Role) keeps working. The controller also
+               re-derives Role from RoleLabelId defensively. *@
+            <input type="hidden" name="Role" id="role-hidden" value="@initialBase" />
+            <small class="muted">
+                @if (canGrantAdmin)
+                {
+                    <text>Defines what the user can do. Manage available roles on the <a asp-controller="Roles" asp-action="Index">Configuration</a> page.</text>
+                }
+                else
+                {
+                    <text>Only an administrator can grant the admin or program-manager tier.</text>
+                }
+            </small>
+        </label>
+
+        <label class="checkbox-row">
+            <input type="checkbox" name="IsSupport" value="true"
+                   checked="@(Model.IsSupport ? "checked" : null)" />
+            <input type="hidden" name="IsSupport" value="false" />
+            <span>
+                <strong>Support (24/7 coverage)</strong>
+                <small class="muted">
+                    Marks this user as always on shift. The weekly schedule
+                    editor is hidden and they're never flagged as absent
+                    against a fixed schedule.
+                </small>
+            </span>
+        </label>
+
+        <label class="checkbox-row">
+            <input type="checkbox" name="OptOutReminderEmails" value="true"
+                   checked="@(Model.OptOutReminderEmails ? "checked" : null)" />
+            <input type="hidden" name="OptOutReminderEmails" value="false" />
+            <span>
+                <strong>Opt out from receiving reminder emails</strong>
+                <small class="muted">
+                    Stops reminder copies sent to this user only. Manager/admin
+                    alert recipients still receive the notification.
+                </small>
+            </span>
+        </label>
+
+        <div class="form-actions">
+            <button type="submit" class="btn btn-primary">Save changes</button>
+            <a class="btn btn-ghost" asp-controller="Users" asp-action="Index">Cancel</a>
+        </div>
+
+        <p class="muted hint">
+            Password changes aren't available here. The account holder can sign out
+            and use the standard reset flow if needed.
+        </p>
+    </form>
+</section>
+
+<script>
+    (function () {
+        // Drives the dynamic Assigned-to dropdown + multi-BU section on
+        // the Edit user form. Pure JS, no deps. Mirrors the modal logic
+        // on the Users index page. The Role dropdown now posts a
+        // RoleDefinition Id; we read the selected option's
+        // data-base-role attribute to drive everything role-aware.
+        var roleSelect = document.getElementById('role-select');
+        var roleHidden = document.getElementById('role-hidden');
+        var mgrSelect = document.getElementById('manager-select');
+        var pmData = JSON.parse(document.getElementById('pm-choices-data').textContent || '[]');
+        var pgmData = JSON.parse(document.getElementById('pgm-choices-data').textContent || '[]');
+        var initialMgrId = @(Model.ManagerId.HasValue ? Model.ManagerId.Value.ToString() : "null");
+        var sections = document.querySelectorAll('[data-role-show]');
+        var buCheckboxes = document.querySelectorAll('.edit-bu-multi');
+        var buHidden = document.getElementById('bu-multi-hidden');
+
+        function currentBaseRole() {
+            var opt = roleSelect.options[roleSelect.selectedIndex];
+            return (opt && opt.getAttribute('data-base-role')) || 'employee';
+        }
+
+        function populateManagers() {
+            var role = currentBaseRole();
+            var source = role === 'pm' ? pgmData : (role === 'employee' ? pmData : []);
+            mgrSelect.innerHTML = '';
+            var blank = document.createElement('option');
+            blank.value = '';
+            blank.textContent = '— Not assigned —';
+            mgrSelect.appendChild(blank);
+            source.forEach(function (item) {
+                var opt = document.createElement('option');
+                opt.value = item.id;
+                opt.textContent = item.label;
+                if (initialMgrId !== null && Number(initialMgrId) === item.id) opt.selected = true;
+                mgrSelect.appendChild(opt);
+            });
+        }
+
+        function syncVisibility() {
+            var role = currentBaseRole();
+            sections.forEach(function (sec) {
+                var roles = (sec.getAttribute('data-role-show') || '').split(',');
+                var show = roles.indexOf(role) !== -1;
+                sec.hidden = !show;
+                sec.querySelectorAll('input, select').forEach(function (el) {
+                    el.disabled = !show;
+                });
+            });
+        }
+
+        function syncBuHidden() {
+            var values = [];
+            buCheckboxes.forEach(function (c) { if (c.checked) values.push(c.value); });
+            buHidden.value = values.join(';');
+        }
+
+        // Keep the hidden canonical Role field in lock-step with the
+        // selected role definition so the existing server-side validators
+        // (which read vm.Role) get the right tier.
+        function syncRoleHidden() {
+            if (roleHidden) roleHidden.value = currentBaseRole();
+        }
+
+        roleSelect.addEventListener('change', function () {
+            syncRoleHidden();
+            populateManagers();
+            syncVisibility();
+        });
+        buCheckboxes.forEach(function (c) { c.addEventListener('change', syncBuHidden); });
+
+        syncRoleHidden();
+        populateManagers();
+        syncVisibility();
+        syncBuHidden();
+    })();
+</script>

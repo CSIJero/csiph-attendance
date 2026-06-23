@@ -1,0 +1,536 @@
+@using AttendanceMonitoring.Helpers
+@using AttendanceMonitoring.Services
+@using AttendanceMonitoring.Data
+@using Microsoft.EntityFrameworkCore
+@using System.Security.Claims
+@using Microsoft.AspNetCore.Mvc.ViewFeatures
+@inject IHttpContextAccessor HttpContextAccessor
+@inject AppDbContext LayoutDb
+@inject Microsoft.Extensions.Configuration.IConfiguration LayoutConfig
+@{
+    var http = HttpContextAccessor.HttpContext;
+    var isAuthed = http?.User?.Identity?.IsAuthenticated == true;
+    var fullName = http?.User?.FindFirst("FullName")?.Value ?? http?.User?.Identity?.Name ?? "User";
+    var role = http?.User?.FindFirst(ClaimTypes.Role)?.Value ?? "employee";
+    var isAdmin = http?.User?.IsInRole("admin") == true
+                  || http?.User?.IsInRole("program_manager") == true
+                  || http?.User?.IsInRole("pm") == true;
+    var thresholdSeconds = AttendanceMonitoring.Models.Constants.DefaultOnlineThresholdSeconds;
+    // Per-viewer wall clock: prefers the browser timezone reported via
+    // the `tz` cookie (#4 — global TZ); falls back to BU-derived offset.
+    // The viewer user is resolved in _ViewStart and stashed on ViewData.
+    var layoutViewer = ViewData["ViewerUser"] as AttendanceMonitoring.Models.User;
+    var layoutTz = (ViewData["TzLabel"] as string) ?? "PHT";
+    var nowViewer = DateTimeOffset.UtcNow.ToOffset(UserClock.DisplayOffset(layoutViewer));
+    var flashes = TempData.ConsumeFlashes();
+
+    // ---- Deployment banner / modal --------------------------------------
+    // Driven by appsettings.json ("Deployment" section). Three modes:
+    //   Normal       — nothing extra rendered.
+    //   Banner       — thin yellow strip at the top informing users that
+    //                  a deployment is in progress.
+    //   ForceRefresh — a full-screen modal blocks interaction and JS
+    //                  hard-reloads the page (Ctrl+F5 equivalent) after the
+    //                  configured delay so users pick up the new build.
+    var deployMode = (LayoutConfig["Deployment:Mode"] ?? "Normal").Trim();
+    var deployMessage = LayoutConfig["Deployment:Message"]
+                        ?? "The system is under deployment. Please save your work.";
+    if (!int.TryParse(LayoutConfig["Deployment:ReloadDelaySeconds"], out var deployReloadSeconds))
+    {
+        deployReloadSeconds = 5;
+    }
+    var deployBanner = string.Equals(deployMode, "Banner", StringComparison.OrdinalIgnoreCase);
+    var deployForceRefresh = string.Equals(deployMode, "ForceRefresh", StringComparison.OrdinalIgnoreCase);
+
+    // Detect the active controller so we can highlight the matching nav tab
+    // with a white pill. Falls back to empty when route data is unavailable.
+    var activeController = (http?.GetRouteValue("controller") as string ?? string.Empty)
+        .ToLowerInvariant();
+    var activeAction = (http?.GetRouteValue("action") as string ?? string.Empty)
+        .ToLowerInvariant();
+    string NavCss(params string[] controllers) =>
+        controllers.Any(c => string.Equals(c, activeController, StringComparison.OrdinalIgnoreCase))
+            ? "nav-link active"
+            : "nav-link";
+
+    // Pending registrations show as a red pill next to the Users nav link.
+    // Only run the query for admin / PM viewers — regular users never see
+    // the Users tab at all.
+    var pendingCount = 0;
+    var pendingEditCount = 0;
+    var pendingLeaveCount = 0;
+    var pendingShiftCount = 0;
+    var pendingQuotaCount = 0;
+    var pendingViolationsCount = 0;
+    var inboxInvestigateCount = 0;
+    var meId = 0;
+    _ = int.TryParse(http?.User?.FindFirst(ClaimTypes.NameIdentifier)?.Value, out meId);
+    if (isAuthed && isAdmin)
+    {
+        try
+        {
+            pendingCount = await LayoutDb.Users.CountAsync(u => !u.Approved);
+        }
+        catch
+        {
+            // Schema may not have caught up yet on first run; treat as zero.
+            pendingCount = 0;
+        }
+        try
+        {
+            pendingEditCount = await LayoutDb.AttendanceEditRequests
+                .CountAsync(r => r.Status == "Pending");
+        }
+        catch
+        {
+            // attendance_edit_requests table may not exist yet on a brand
+            // new deploy; the EnsureAttendanceEditRequestsTableAsync
+            // migration adds it on the next request.
+            pendingEditCount = 0;
+        }
+        try
+        {
+            pendingLeaveCount = await LayoutDb.LeaveRequests
+                .CountAsync(r => r.Status == "Pending");
+        }
+        catch
+        {
+            // leave_requests table may not exist yet on a brand new deploy.
+            pendingLeaveCount = 0;
+        }
+        try
+        {
+            pendingShiftCount = await LayoutDb.ScheduleAmendments
+                .CountAsync(r => r.Status == "Pending");
+        }
+        catch
+        {
+            // schedule_amendments table may not exist yet on a brand new deploy.
+            pendingShiftCount = 0;
+        }
+        try
+        {
+            pendingQuotaCount = await LayoutDb.QuotaResetRequests
+                .CountAsync(r => r.Status == "Pending");
+        }
+        catch
+        {
+            // quota_reset_requests table may not exist yet on a brand new deploy.
+            pendingQuotaCount = 0;
+        }
+        try
+        {
+            pendingViolationsCount = await LayoutDb.NotificationLogs
+                .CountAsync(n => n.OfflineMinutes >= 60
+                                 && (n.Level == "Warning" || n.Level == "Deduction")
+                                 && n.ActionTaken == null);
+        }
+        catch
+        {
+            // notification_log.ActionTaken may not exist yet on a brand
+            // new deploy; the EnsureNotificationLogActionColumnsAsync
+            // migration adds it on the next request.
+            pendingViolationsCount = 0;
+        }
+    }
+    else if (isAuthed && meId > 0)
+    {
+        try
+        {
+            inboxInvestigateCount = await LayoutDb.NotificationLogs
+                .CountAsync(n => n.UserId == meId
+                                 && n.OfflineMinutes >= 60
+                                 && (n.Level == "Warning" || n.Level == "Deduction")
+                                 && n.ActionTaken == "Investigating");
+        }
+        catch
+        {
+            inboxInvestigateCount = 0;
+        }
+    }
+}
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>@ViewData["Title"] – Attendance Monitoring</title>
+    <link rel="icon" type="image/svg+xml" href="~/favicon.svg" />
+    <link rel="stylesheet" href="~/css/style.css" asp-append-version="true" />
+    <!--
+        Progressive Web App: registers a manifest so the dashboard can
+        be installed to a phone's home screen, and a service worker that
+        powers offline tile caching + push notifications. Both are
+        no-ops on browsers that don't support them, so this is safe to
+        ship in the base layout.
+    -->
+    <link rel="manifest" href="~/manifest.json" />
+    <meta name="theme-color" content="#2c3e50" />
+</head>
+<body data-authed="@(isAuthed ? "1" : "0")">
+    @* Browser timezone bootstrap: every page renders times in the
+       viewer's *local* timezone (per #4 — "global"). We capture the
+       browser's UTC offset and IANA name into a short cookie that the
+       server-side UserClock formatter reads on the next request. Runs
+       as early as possible to minimise the window during which the
+       fallback (PHT) is showing. Reloads exactly once if the cookie
+       value doesn't match what the browser is reporting. *@
+    <script>
+        (function () {
+            try {
+                var minutes = -new Date().getTimezoneOffset();
+                var iana = '';
+                try { iana = Intl.DateTimeFormat().resolvedOptions().timeZone || ''; } catch (e) { iana = ''; }
+                var desired = minutes + '|' + iana;
+                var m = document.cookie.match(/(?:^|; )tz=([^;]*)/);
+                var current = m ? decodeURIComponent(m[1]) : null;
+                if (current !== desired) {
+                    document.cookie = 'tz=' + encodeURIComponent(desired)
+                        + '; path=/; max-age=2592000; SameSite=Lax';
+                    // Reload once so the server picks up the new offset.
+                    // After reload, current === desired and we stop.
+                    location.reload();
+                }
+            } catch (e) { /* swallow — fallback to server default */ }
+        })();
+    </script>
+    @if (deployBanner || deployForceRefresh)
+    {
+        <div class="deploy-banner" role="status" aria-live="polite">
+            <strong>Deployment in progress.</strong>
+            <span>@deployMessage</span>
+        </div>
+    }
+    @if (deployForceRefresh)
+    {
+        @* Full-screen overlay that hard-reloads the page after a short
+           delay so users pick up the new build without manually hitting
+           Ctrl+F5. The reload is performed by JS (location.reload with
+           cache-busting param) once the timer expires; the user can also
+           click the button to reload immediately.
+
+           Build-instance fingerprint: we use Process.StartTime as a
+           per-container identifier. Once a user has reloaded for the
+           current build, we stash a flag in sessionStorage keyed by that
+           id and suppress the modal on subsequent navigations until the
+           container restarts (i.e. the next deploy). *@
+        var deployBuildId = System.Diagnostics.Process.GetCurrentProcess().StartTime.Ticks.ToString("X");
+        <div id="deploy-refresh-modal" class="deploy-modal" role="alertdialog"
+             aria-modal="true" aria-labelledby="deploy-refresh-title"
+             data-build-id="@deployBuildId" hidden>
+            <div class="deploy-modal-inner">
+                <h2 id="deploy-refresh-title">Please refresh — system updated</h2>
+                <p>@deployMessage</p>
+                <p class="muted">
+                    This page will hard-reload automatically in
+                    <span id="deploy-refresh-countdown">@deployReloadSeconds</span> second(s).
+                </p>
+                <button type="button" id="deploy-refresh-now" class="btn btn-primary">
+                    Refresh now
+                </button>
+            </div>
+        </div>
+        <script>
+            (function () {
+                'use strict';
+                var modal = document.getElementById('deploy-refresh-modal');
+                if (!modal) return;
+                var buildId = modal.getAttribute('data-build-id') || '';
+                var storageKey = 'deploy.refreshed.' + buildId;
+                // If this browser has already reloaded for the current
+                // build instance, keep the modal hidden and bail out.
+                try {
+                    if (window.sessionStorage && sessionStorage.getItem(storageKey)) {
+                        return;
+                    }
+                } catch (e) { /* sessionStorage unavailable — show modal */ }
+                modal.hidden = false;
+                var seconds = @deployReloadSeconds;
+                var el = document.getElementById('deploy-refresh-countdown');
+                var btn = document.getElementById('deploy-refresh-now');
+                function hardReload() {
+                    try {
+                        if (window.sessionStorage) {
+                            sessionStorage.setItem(storageKey, '1');
+                        }
+                    } catch (e) { /* ignore */ }
+                    // Hide the modal immediately so the user doesn't see
+                    // it during the brief reload latency.
+                    modal.hidden = true;
+                    var url = new URL(window.location.href);
+                    url.searchParams.set('_deploy', Date.now().toString());
+                    window.location.replace(url.toString());
+                }
+                if (btn) btn.addEventListener('click', hardReload);
+                var t = setInterval(function () {
+                    seconds = Math.max(0, seconds - 1);
+                    if (el) el.textContent = seconds;
+                    if (seconds <= 0) { clearInterval(t); hardReload(); }
+                }, 1000);
+            })();
+        </script>
+    }
+    @if (isAuthed)
+    {
+        @* Adminty-style sidebar shell. The left rail keeps all the nav
+           links (with their existing pending-count badges); the slim
+           white topbar shows the page title and user/logout. On narrow
+           viewports the sidebar slides in/out via the hamburger toggle. *@
+        <div class="app-shell">
+            <button type="button" class="sidebar-backdrop" id="sidebar-backdrop"
+                    aria-label="Close navigation"></button>
+
+            <aside class="sidebar" id="sidebar" aria-label="Primary navigation">
+                <div class="sidebar-header">
+                    <a class="brand-link"
+                       asp-controller="Dashboard" asp-action="Index">
+                        <img src="~/images/logo-mark.svg" alt="CSI Interfusion" class="brand-logo" />
+                        <span class="brand-text">
+                            <strong>CSI Interfusion</strong>
+                            <small>Attendance Monitor</small>
+                        </span>
+                    </a>
+                </div>
+
+                <div class="sidebar-section-label">Navigation</div>
+                <nav class="sidebar-nav">
+                    <a asp-controller="Dashboard" asp-action="Index" class="@NavCss("Dashboard")">Dashboard</a>
+                    @if (!isAdmin)
+                    {
+                        <a asp-controller="Schedule" asp-action="Edit" class="@NavCss("Schedule")">My Schedule</a>
+                        @* "My Attendance" highlights only when actually on the
+                           Attendance/Index page, not when filing an Add Time
+                           Entry (that lives under the Requests hub below). *@
+                        var myAttendanceActive = activeController == "attendance"
+                            && activeAction != "requestmissingentry"
+                            ? "nav-link active"
+                            : "nav-link";
+                        <a asp-controller="Attendance" asp-action="Index" class="@myAttendanceActive">My Attendance</a>
+                        @* Employee "Requests" hub — covers Leave of absence,
+                           Shift changes, and Add time entry. Highlight stays
+                           lit on the Add Time Entry page too (Attendance
+                           controller, RequestMissingEntry action). *@
+                        var empRequestsActive = activeController == "leave"
+                            || (activeController == "attendance" && activeAction == "requestmissingentry")
+                            ? "nav-link active"
+                            : "nav-link";
+                        <a asp-controller="Leave" asp-action="Index" class="@empRequestsActive">Requests</a>
+                        var inboxActive = activeController == "violations" && activeAction == "inbox"
+                            ? "nav-link active"
+                            : "nav-link";
+                        <a asp-controller="Violations" asp-action="Inbox" class="@inboxActive">
+                            <text>Inbox</text>
+                            @if (inboxInvestigateCount > 0)
+                            {
+                                <span class="badge-pending" title="@inboxInvestigateCount reminder(s) need your explanation">@inboxInvestigateCount</span>
+                            }
+                        </a>
+                    }
+                    @if (isAdmin)
+                    {
+                        var pendingRequests = pendingEditCount + pendingLeaveCount + pendingShiftCount + pendingQuotaCount;
+                        // "Requests" parent tab — combines attendance-edit reviews,
+                        // leave-of-absence approvals, shift-amendment requests, and
+                        // break / lunch reset requests into a single nav entry. The
+                        // sub-tabs inside the page let admins switch between the queues.
+                        var requestsActive = (activeController == "attendance" || activeController == "leave"
+                                || activeController == "quotareset"
+                                || (activeController == "schedule" && activeAction.StartsWith("amend")))
+                            ? "nav-link active nav-users"
+                            : "nav-link nav-users";
+
+                        <a asp-controller="Reports" asp-action="Daily" class="@NavCss("Reports")">Reports</a>
+                        @* "Schedule" — admins/PMs jump straight into the per-user
+                           schedule editor. The page itself handles user selection
+                           (admins land on the first non-admin user by default). *@
+                        <a asp-controller="Schedule" asp-action="Edit"
+                           class="@(activeController == "schedule" && !activeAction.StartsWith("amend") ? "nav-link active" : "nav-link")">
+                            Schedule
+                        </a>
+                        <a asp-controller="Attendance" asp-action="EditRequests" class="@requestsActive">
+                            <text>Requests</text>
+                            @if (pendingRequests > 0)
+                            {
+                                <span class="badge-pending" title="@pendingEditCount edit + @pendingLeaveCount leave + @pendingShiftCount shift + @pendingQuotaCount quota pending">@pendingRequests</span>
+                            }
+                        </a>
+                        <a asp-controller="Users" asp-action="Index" class="@(NavCss("Users")) nav-users">
+                            <text>Users</text>
+                            @if (pendingCount > 0)
+                            {
+                                <span class="badge-pending" title="@pendingCount pending approval(s)">@pendingCount</span>
+                            }
+                        </a>
+                        <a asp-controller="Violations" asp-action="Index" class="@NavCss("Violations")">
+                            <text>Reminders</text>
+                            @if (pendingViolationsCount > 0)
+                            {
+                                <span class="badge-pending" title="@pendingViolationsCount pending review">@pendingViolationsCount</span>
+                            }
+                        </a>
+                        @if (User.IsInRole("admin"))
+                        {
+                            <a asp-controller="Roles" asp-action="Index" class="@NavCss("Roles")">Configuration</a>
+                            <a asp-controller="Sites" asp-action="Index" class="@NavCss("Sites")">Sites</a>
+                            <a asp-controller="Holidays" asp-action="Index" class="@NavCss("Holidays")">Holidays</a>
+                            <a asp-controller="LeaveBalances" asp-action="Index" class="@NavCss("LeaveBalances")">Leave Balances</a>
+                            <a asp-controller="Settings" asp-action="Index" class="@NavCss("Settings")">Settings</a>
+                        }
+                    }
+                </nav>
+
+                <div class="sidebar-footer">
+                    <a class="user-pill"
+                       asp-controller="Profile" asp-action="Index"
+                       title="View your profile">
+                        <span class="dot dot-online" id="self-status-dot"></span>
+                        @fullName
+                        <small>(@role)</small>
+                    </a>
+                    <div class="sidebar-account-links">
+                        <a asp-controller="Profile" asp-action="Index"
+                           class="@NavCss("Profile")">Profile</a>
+                        <a asp-controller="FaceEnroll" asp-action="Index"
+                           class="@NavCss("FaceEnroll")">Face Profile</a>
+                        <a asp-controller="Account" asp-action="ChangePassword"
+                           class="@(activeController == "account" && activeAction == "changepassword" ? "nav-link active" : "nav-link")">
+                            Change password
+                        </a>
+                    </div>
+                    <form method="post" asp-controller="Account" asp-action="Logout" class="inline">
+                        @Html.AntiForgeryToken()
+                        <button type="submit" class="btn btn-ghost">Logout</button>
+                    </form>
+                </div>
+            </aside>
+
+            <div class="app-main">
+                <header class="app-topbar">
+                    <div class="topbar-left">
+                        <button type="button" class="sidebar-toggle" id="sidebar-toggle"
+                                aria-label="Toggle navigation" aria-controls="sidebar">
+                            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"
+                                 fill="none" stroke="currentColor" stroke-width="2"
+                                 stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                                <line x1="3" y1="6" x2="21" y2="6"></line>
+                                <line x1="3" y1="12" x2="21" y2="12"></line>
+                                <line x1="3" y1="18" x2="21" y2="18"></line>
+                            </svg>
+                        </button>
+                        <h1 class="page-title">@ViewData["Title"]</h1>
+                    </div>
+                </header>
+
+                <main class="container">
+                    @if (flashes.Count > 0)
+                    {
+                        <div class="flashes">
+                            @foreach (var f in flashes)
+                            {
+                                <div class="flash flash-@f.Category">@f.Message</div>
+                            }
+                        </div>
+                    }
+
+                    @RenderBody()
+                </main>
+
+                <footer class="footer">
+                    <small>
+                        Online threshold: @thresholdSeconds s
+                        &middot; Server time:
+                        <span id="server-time">@nowViewer.ToString("yyyy-MM-dd HH:mm") @layoutTz</span>
+                    </small>
+                </footer>
+            </div>
+        </div>
+    }
+    else
+    {
+        @* Unauthenticated layout — login/register only. Keep the original
+           single-column flow with a thin brand strip up top. *@
+        <header class="topbar">
+            <div class="brand">
+                <a class="brand-link"
+                   asp-controller="Account" asp-action="Login">
+                    <img src="~/images/logo-mark.svg" alt="CSI Interfusion" class="brand-logo" />
+                    <span class="brand-text">
+                        <strong>CSI Interfusion</strong>
+                        <small>Attendance Monitor</small>
+                    </span>
+                </a>
+            </div>
+        </header>
+
+        <main class="container">
+            @if (flashes.Count > 0)
+            {
+                <div class="flashes">
+                    @foreach (var f in flashes)
+                    {
+                        <div class="flash flash-@f.Category">@f.Message</div>
+                    }
+                </div>
+            }
+
+            @RenderBody()
+        </main>
+
+        <footer class="footer">
+            <small>
+                Online threshold: @thresholdSeconds s
+                &middot; Server time:
+                <span id="server-time">@nowViewer.ToString("yyyy-MM-dd HH:mm") @layoutTz</span>
+            </small>
+        </footer>
+    }
+
+    @if (isAuthed)
+    {
+        @await Html.PartialAsync("_SelfieModal")
+        <script src="~/js/app.js" asp-append-version="true"></script>
+        <script src="~/js/selfie.js" asp-append-version="true"></script>
+        @* Mobile sidebar toggle — opens/closes the slide-in sidebar on
+           narrow viewports. Pure inline so it works even if app.js
+           hasn't finished loading. *@
+        <script>
+            (function () {
+                var sidebar = document.getElementById('sidebar');
+                var toggle = document.getElementById('sidebar-toggle');
+                var backdrop = document.getElementById('sidebar-backdrop');
+                if (!sidebar || !toggle) return;
+                function close() {
+                    sidebar.classList.remove('is-open');
+                    if (backdrop) backdrop.classList.remove('is-visible');
+                }
+                function open() {
+                    sidebar.classList.add('is-open');
+                    if (backdrop) backdrop.classList.add('is-visible');
+                }
+                toggle.addEventListener('click', function () {
+                    if (sidebar.classList.contains('is-open')) close(); else open();
+                });
+                if (backdrop) backdrop.addEventListener('click', close);
+                // Close after navigating (sidebar links).
+                sidebar.querySelectorAll('a.nav-link').forEach(function (a) {
+                    a.addEventListener('click', function () {
+                        if (window.matchMedia('(max-width: 880px)').matches) close();
+                    });
+                });
+                window.addEventListener('keydown', function (e) {
+                    if (e.key === 'Escape') close();
+                });
+            })();
+        </script>
+    }
+    <script src="~/js/table-sort.js" asp-append-version="true"></script>
+    <!--
+        PWA bootstrap: registers the service worker and (if the browser
+        supports Push) subscribes the user using the VAPID public key
+        fetched from /api/push/vapid-public-key. Both calls are best-
+        effort; failures are silenced so the dashboard keeps working.
+    -->
+    <script src="~/js/pwa-register.js" asp-append-version="true"></script>
+    @await RenderSectionAsync("Scripts", required: false)
+</body>
+</html>

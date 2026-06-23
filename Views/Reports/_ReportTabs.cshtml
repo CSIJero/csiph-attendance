@@ -1,0 +1,16 @@
+@*
+    Shared tab nav for the Reports area. Pass the active tab name as the
+    model ("daily" or "weekly"); each link is highlighted accordingly.
+*@
+@model string
+
+<nav class="report-tabs" aria-label="Report views">
+    <a class="report-tab @(Model == "daily" ? "is-active" : "")"
+       asp-controller="Reports" asp-action="Daily">
+        Daily Report
+    </a>
+    <a class="report-tab @(Model == "weekly" ? "is-active" : "")"
+       asp-controller="Reports" asp-action="Weekly">
+        Weekly Report
+    </a>
+</nav>

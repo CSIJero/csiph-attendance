@@ -1,0 +1,153 @@
+@using AttendanceMonitoring.Services
+@model AttendanceMonitoring.ViewModels.AttendanceEditRequestFormViewModel
+@{
+    ViewData["Title"] = "Request attendance edit";
+    var subject = Model.Record.User;
+    var subjectTz = UserClock.Label(subject);
+    var subjectOffset = UserClock.DisplayOffset(subject);
+    DateTime? ToLocal(DateTime? utc)
+    {
+        if (utc is null) return null;
+        var v = utc.Value;
+        if (v.Kind == DateTimeKind.Unspecified) v = DateTime.SpecifyKind(v, DateTimeKind.Utc);
+        return new DateTimeOffset(v).ToOffset(subjectOffset).DateTime;
+    }
+    var ciPh = ToLocal(Model.Record.CheckIn);
+    var coPh = ToLocal(Model.Record.CheckOut);
+    // Pre-fill with the in-flight pending values if one already exists,
+    // otherwise with the row's current actuals so the employee can tweak
+    // just the field they need to change.
+    var formCi = Model.Existing is not null
+        ? ToLocal(Model.Existing.RequestedCheckIn)
+        : ciPh;
+    var formCo = Model.Existing is not null
+        ? ToLocal(Model.Existing.RequestedCheckOut)
+        : coPh;
+    var formWd = Model.Existing is not null
+        ? Model.Existing.RequestedWorkDate
+        : Model.Record.WorkDate;
+    var formReason = Model.Existing?.Reason ?? string.Empty;
+}
+
+<section class="hero">
+    <div>
+        <h1>Request attendance edit</h1>
+        <p class="muted">
+            Propose a correction to your clock-in / clock-out for
+            <strong>@Model.Record.WorkDate.ToString("yyyy-MM-dd")</strong>.
+            Your PM (or an admin) will approve or reject the change.
+            Times are in @subjectTz (your local zone).
+        </p>
+    </div>
+</section>
+
+@if (Model.Existing is not null)
+{
+    <section class="card" style="border-left:4px solid #f59e0b;">
+        <div class="card-header">
+            <h2 style="color:#92400e;">A request is already pending</h2>
+        </div>
+        <p class="muted">
+            Submitted @UserClock.Format(subject, Model.Existing.RequestedAt, "yyyy-MM-dd HH:mm") @subjectTz.
+            You can amend the proposal below until a reviewer approves or rejects it.
+        </p>
+    </section>
+}
+
+<section class="card">
+    <div class="card-header">
+        <h2>Current values</h2>
+        <small class="muted">For reference — what's on file now.</small>
+    </div>
+    <div class="kv-grid">
+        <div><strong>Work date</strong></div>
+        <div>@Model.Record.WorkDate.ToString("yyyy-MM-dd")</div>
+        <div><strong>Check-in</strong></div>
+        <div>@UserClock.Format(subject, Model.Record.CheckIn, "yyyy-MM-dd HH:mm") @subjectTz</div>
+        <div><strong>Check-out</strong></div>
+        <div>
+            @if (Model.Record.CheckOut is not null)
+            {
+                @($"{UserClock.Format(subject, Model.Record.CheckOut, "yyyy-MM-dd HH:mm")} {subjectTz}")
+            }
+            else
+            {
+                <span class="muted">— still open —</span>
+            }
+        </div>
+    </div>
+</section>
+
+<section class="card">
+    <div class="card-header">
+        <h2>Proposed values</h2>
+    </div>
+    <form method="post"
+          asp-controller="Attendance"
+          asp-action="RequestEditPost"
+          asp-route-id="@Model.Record.Id"
+          class="stacked-form">
+        @Html.AntiForgeryToken()
+        <input type="hidden" name="return_url" value="@Model.ReturnUrl" />
+
+        <label>
+            <span>Work date</span>
+            <input type="date" name="work_date"
+                   value="@formWd.ToString("yyyy-MM-dd")"
+                   required />
+        </label>
+
+        <label>
+            <span>Check-in (@subjectTz)</span>
+            <input type="datetime-local" name="check_in" required
+                   value="@(formCi?.ToString("yyyy-MM-ddTHH:mm") ?? "")" />
+        </label>
+
+        <label>
+            <span>Check-out (@subjectTz)
+                <small class="muted">— leave blank if you forgot to clock out</small>
+            </span>
+            <input type="datetime-local" name="check_out"
+                   value="@(formCo?.ToString("yyyy-MM-ddTHH:mm") ?? "")" />
+        </label>
+
+        <label>
+            <span>Reason <small class="muted">— required, shown to your reviewer</small></span>
+            <textarea name="reason" rows="3" maxlength="500" required
+                      placeholder="e.g. Forgot to clock out at 6 pm; was helping a customer."
+                    >@formReason</textarea>
+        </label>
+
+        <label>
+            <span>Image proof <small class="muted">— required for time adjustment</small></span>
+            <input type="file" id="proof_picker" accept="image/*" required />
+            <input type="hidden" id="proof_photo" name="proof_photo" />
+        </label>
+
+        <div class="form-actions">
+            <button type="submit" class="btn btn-primary">
+                @(Model.Existing is null ? "Submit request" : "Update request")
+            </button>
+            <a class="btn"
+               asp-controller="Attendance"
+               asp-action="Index">Cancel</a>
+        </div>
+    </form>
+</section>
+
+<script>
+(function () {
+    const picker = document.getElementById('proof_picker');
+    const hidden = document.getElementById('proof_photo');
+    if (!picker || !hidden) return;
+    picker.addEventListener('change', function () {
+        const file = picker.files && picker.files[0];
+        if (!file) { hidden.value = ''; return; }
+        const reader = new FileReader();
+        reader.onload = function (e) {
+            hidden.value = (e.target && e.target.result) ? String(e.target.result) : '';
+        };
+        reader.readAsDataURL(file);
+    });
+})();
+</script>

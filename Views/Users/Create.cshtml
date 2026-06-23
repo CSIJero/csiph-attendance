@@ -1,0 +1,337 @@
+@model NewUserViewModel
+@{
+    ViewData["Title"] = "New user";
+    var fieldErrors = ViewBag.FieldErrors as Dictionary<string, string>
+                      ?? new Dictionary<string, string>();
+    string ErrCls(string key) => fieldErrors.ContainsKey(key) ? "has-error" : "";
+    string ErrMsg(string key) => fieldErrors.TryGetValue(key, out var m) ? m : "";
+    var isPureAdmin = User.IsInRole("admin");
+    var currentRole = string.IsNullOrEmpty(Model.Role) ? "employee" : Model.Role;
+}
+
+<section class="hero">
+    <div>
+        <h1>New user</h1>
+        <p class="muted">
+            Create a user directly. Accounts created here <strong>skip the approval
+            queue</strong> and can sign in immediately with the password you set.
+            For self-service signup, point the person at <a asp-controller="Account" asp-action="Register">Register</a>
+            instead.
+        </p>
+    </div>
+    <div class="hero-actions">
+        <a asp-controller="Users" asp-action="Index" class="btn btn-secondary">
+            Back to Users
+        </a>
+    </div>
+</section>
+
+<section class="card">
+    <div class="card-header">
+        <h2>Account details</h2>
+    </div>
+    <div class="card-body">
+        @if (fieldErrors.Count > 0)
+        {
+            <div class="flash flash-danger" role="alert">
+                <strong>We couldn't create the account.</strong>
+                <ul class="error-list">
+                    @foreach (var kvp in fieldErrors)
+                    {
+                        <li>@kvp.Value</li>
+                    }
+                </ul>
+            </div>
+        }
+
+        <form method="post" asp-controller="Users" asp-action="Create" id="user-create-form" class="stacked-form">
+            @Html.AntiForgeryToken()
+
+            <label class="@ErrCls("FullName")">
+                <span class="field-label">Full name <span class="req">*</span></span>
+                <input type="text" name="FullName" required
+                       minlength="2" maxlength="120"
+                       autocomplete="name"
+                       value="@Model.FullName"
+                       aria-invalid="@(fieldErrors.ContainsKey("FullName") ? "true" : "false")" />
+                @if (fieldErrors.ContainsKey("FullName"))
+                {
+                    <small class="field-error">@ErrMsg("FullName")</small>
+                }
+            </label>
+
+            <label class="@ErrCls("Username")">
+                <span class="field-label">Username <span class="req">*</span></span>
+                <input type="text" name="Username" required
+                       pattern="[A-Za-z0-9_.\-]{3,64}"
+                       title="3–64 characters: letters, digits, dot, underscore or hyphen."
+                       maxlength="64"
+                       autocomplete="off"
+                       value="@Model.Username"
+                       aria-invalid="@(fieldErrors.ContainsKey("Username") ? "true" : "false")" />
+                <small class="muted">3–64 chars: letters, digits, dot, underscore, hyphen.</small>
+                @if (fieldErrors.ContainsKey("Username"))
+                {
+                    <small class="field-error">@ErrMsg("Username")</small>
+                }
+            </label>
+
+            <label class="@ErrCls("Email")">
+                <span class="field-label">Email <span class="req">*</span></span>
+                <input type="email" name="Email" required
+                       maxlength="200"
+                       autocomplete="off"
+                       value="@Model.Email"
+                       aria-invalid="@(fieldErrors.ContainsKey("Email") ? "true" : "false")" />
+                @if (fieldErrors.ContainsKey("Email"))
+                {
+                    <small class="field-error">@ErrMsg("Email")</small>
+                }
+            </label>
+
+            <label class="@ErrCls("EmployeeId")">
+                <span class="field-label">Employee ID <small class="muted">(optional)</small></span>
+                <input type="text" name="EmployeeId"
+                       placeholder="e.g. E000123 or E001234"
+                       pattern="E\d{6,7}"
+                       title="E followed by 6 or 7 digits."
+                       maxlength="8"
+                       value="@Model.EmployeeId"
+                       aria-invalid="@(fieldErrors.ContainsKey("EmployeeId") ? "true" : "false")" />
+                <small class="muted">Format: E + 6&ndash;7 digits.</small>
+                @if (fieldErrors.ContainsKey("EmployeeId"))
+                {
+                    <small class="field-error">@ErrMsg("EmployeeId")</small>
+                }
+            </label>
+
+            <label class="@ErrCls("BusinessUnit")">
+                <span class="field-label">Business Unit <span class="req" data-role-hide="program_manager">*</span></span>
+                <select name="BusinessUnit"
+                       aria-invalid="@(fieldErrors.ContainsKey("BusinessUnit") ? "true" : "false")">
+                    <option value="">— Select —</option>
+                    @foreach (var bu in Model.BusinessUnitChoices)
+                    {
+                        <option value="@bu" selected="@(string.Equals(Model.BusinessUnit, bu, StringComparison.OrdinalIgnoreCase))">@bu</option>
+                    }
+                </select>
+                <small class="muted">BU2/BU3/BU4 are split by country (PH or IN) so the matching PM sees the right people. Required for Employee and Project Manager roles.</small>
+                @if (fieldErrors.ContainsKey("BusinessUnit"))
+                {
+                    <small class="field-error">@ErrMsg("BusinessUnit")</small>
+                }
+            </label>
+
+            <label class="@ErrCls("ManagerId")" data-role-show="employee,pm">
+                <span class="field-label">Assigned to <small class="muted">(optional)</small></span>
+                <select name="ManagerId" id="manager-select">
+                    <option value="">— Not assigned —</option>
+                </select>
+                <small class="muted" id="manager-help">Employees report to a Project Manager; Project Managers report to a Program Manager.</small>
+                @if (fieldErrors.ContainsKey("ManagerId"))
+                {
+                    <small class="field-error">@ErrMsg("ManagerId")</small>
+                }
+            </label>
+
+            <script type="application/json" id="pm-choices-data">
+                @Html.Raw(System.Text.Json.JsonSerializer.Serialize(Model.ProjectManagerChoices.Select(p => new {
+                    id = p.Id,
+                    label = $"{p.FullName} ({AttendanceMonitoring.Models.Roles.DisplayName(p.Role)})" + (string.IsNullOrEmpty(p.BusinessUnit) ? "" : $" · {p.BusinessUnit}")
+                })))
+            </script>
+            <script type="application/json" id="pgm-choices-data">
+                @Html.Raw(System.Text.Json.JsonSerializer.Serialize(Model.ProgramManagerChoices.Select(p => new {
+                    id = p.Id,
+                    label = $"{p.FullName} ({AttendanceMonitoring.Models.Roles.DisplayName(p.Role)})"
+                })))
+            </script>
+
+            <div class="field-block" id="bu-multi-block" data-role-show="program_manager" hidden>
+                <span class="field-label">Business Units <span class="req">*</span></span>
+                <div class="bu-multi">
+                    @{
+                        var picked = Model.BusinessUnits?.Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToHashSet()
+                                      ?? new HashSet<string>();
+                    }
+                    @foreach (var bu in Model.BusinessUnitChoices)
+                    {
+                        var isPicked = picked.Contains(bu);
+                        <label class="checkbox-row">
+                            <input type="checkbox" class="create-bu-multi" value="@bu" checked="@(isPicked ? "checked" : null)" />
+                            <span>@bu</span>
+                        </label>
+                    }
+                </div>
+                <input type="hidden" name="BusinessUnits" id="bu-multi-hidden" value="@Model.BusinessUnits" />
+                <small class="muted">Program Managers see every user whose BU is in this list (e.g. BU2 (PH) + BU2 (IN)).</small>
+                @if (fieldErrors.ContainsKey("BusinessUnits"))
+                {
+                    <small class="field-error">@ErrMsg("BusinessUnits")</small>
+                }
+            </div>
+
+            @{
+                // Filter role definitions so non-pure-admins can't grant
+                // admin / program_manager tiers (defense-in-depth — the
+                // controller re-checks this on POST).
+                var roleChoices = Model.RoleLabelChoices
+                    .Where(d => isPureAdmin
+                        || (d.BaseRole != AttendanceMonitoring.Models.Roles.Admin
+                         && d.BaseRole != AttendanceMonitoring.Models.Roles.ProgramManager))
+                    .ToList();
+                // Pre-select: if the form was repopulated after a failed
+                // submit, honour the picked label; otherwise default to
+                // the first definition that matches the current canonical
+                // role (typically "Employee" for new accounts).
+                var selectedDefId = Model.RoleLabelId
+                    ?? roleChoices.FirstOrDefault(d => string.Equals(d.BaseRole, currentRole, StringComparison.OrdinalIgnoreCase))?.Id
+                    ?? roleChoices.FirstOrDefault()?.Id;
+                var selectedDef = roleChoices.FirstOrDefault(d => d.Id == selectedDefId);
+                var initialBase = selectedDef?.BaseRole ?? currentRole;
+            }
+            <label class="@ErrCls("Role")">
+                <span class="field-label">Role <span class="req">*</span></span>
+                <select name="RoleLabelId" id="role-select" required
+                       aria-invalid="@(fieldErrors.ContainsKey("Role") ? "true" : "false")">
+                    @foreach (var def in roleChoices)
+                    {
+                        var sel = selectedDefId == def.Id;
+                        var label = def.IsBuiltIn
+                            ? def.Name
+                            : $"{def.Name} \u00B7 {AttendanceMonitoring.Models.Roles.DisplayName(def.BaseRole)} tier";
+                        <option value="@def.Id"
+                                data-base-role="@def.BaseRole"
+                                selected="@sel">@label</option>
+                    }
+                </select>
+                @* Hidden canonical role mirrors the selected option's
+                   data-base-role so the existing server-side validation
+                   (which reads vm.Role) keeps working. The controller
+                   also re-derives Role from RoleLabelId defensively. *@
+                <input type="hidden" name="Role" id="role-hidden" value="@initialBase" />
+                <small class="muted">
+                    Defines what the user can do. Manage available roles on the
+                    <a asp-controller="Roles" asp-action="Index">Configuration</a> page.
+                </small>
+                @if (fieldErrors.ContainsKey("Role"))
+                {
+                    <small class="field-error">@ErrMsg("Role")</small>
+                }
+                @if (fieldErrors.ContainsKey("RoleLabelId"))
+                {
+                    <small class="field-error">@ErrMsg("RoleLabelId")</small>
+                }
+            </label>
+
+            <label class="@ErrCls("Password")">
+                <span class="field-label">Password <span class="req">*</span></span>
+                <input type="password" name="Password" required
+                       minlength="6" maxlength="200"
+                       autocomplete="new-password"
+                       pattern="(?=.*[A-Za-z])(?=.*\d).{6,}"
+                       title="At least 6 characters and must contain a letter and a digit." />
+                <small class="muted">
+                    At least 6 characters, with one letter and one digit. Share this
+                    with the user out-of-band so they can sign in.
+                </small>
+                @if (fieldErrors.ContainsKey("Password"))
+                {
+                    <small class="field-error">@ErrMsg("Password")</small>
+                }
+            </label>
+
+            <div class="form-actions">
+                <button type="submit" class="btn btn-primary">Create user</button>
+                <a asp-controller="Users" asp-action="Index" class="btn btn-secondary">Cancel</a>
+            </div>
+        </form>
+    </div>
+</section>
+
+@section Scripts {
+    <script>
+        (function () {
+            var form = document.getElementById('user-create-form');
+            if (!form) return;
+            form.addEventListener('submit', function () { form.classList.add('was-validated'); }, false);
+
+            // Role-driven manager + BU section toggles. Same pattern as Edit.
+            // The Role dropdown now posts RoleLabelId (FK to RoleDefinition);
+            // we read the selected option's data-base-role attribute to drive
+            // the rest of the form (manager picklist + BU visibility).
+            var roleSelect = document.getElementById('role-select');
+            var roleHidden = document.getElementById('role-hidden');
+            var mgrSelect = document.getElementById('manager-select');
+            if (!roleSelect || !mgrSelect) return;
+            var pmData = JSON.parse(document.getElementById('pm-choices-data').textContent || '[]');
+            var pgmData = JSON.parse(document.getElementById('pgm-choices-data').textContent || '[]');
+            var initialMgrId = @(Model.ManagerId.HasValue ? Model.ManagerId.Value.ToString() : "null");
+            var sections = document.querySelectorAll('[data-role-show]');
+            var buCheckboxes = document.querySelectorAll('.create-bu-multi');
+            var buHidden = document.getElementById('bu-multi-hidden');
+
+            // The canonical permission tier of the currently-selected role
+            // definition (employee / pm / program_manager / admin), read
+            // off the selected <option>'s data-base-role attribute.
+            function currentBaseRole() {
+                var opt = roleSelect.options[roleSelect.selectedIndex];
+                return (opt && opt.getAttribute('data-base-role')) || 'employee';
+            }
+
+            function populateManagers() {
+                var role = currentBaseRole();
+                var source = role === 'pm' ? pgmData : (role === 'employee' ? pmData : []);
+                mgrSelect.innerHTML = '';
+                var blank = document.createElement('option');
+                blank.value = '';
+                blank.textContent = '— Not assigned —';
+                mgrSelect.appendChild(blank);
+                source.forEach(function (item) {
+                    var opt = document.createElement('option');
+                    opt.value = item.id;
+                    opt.textContent = item.label;
+                    if (initialMgrId !== null && Number(initialMgrId) === item.id) opt.selected = true;
+                    mgrSelect.appendChild(opt);
+                });
+            }
+
+            function syncVisibility() {
+                var role = currentBaseRole();
+                sections.forEach(function (sec) {
+                    var roles = (sec.getAttribute('data-role-show') || '').split(',');
+                    var show = roles.indexOf(role) !== -1;
+                    sec.hidden = !show;
+                    sec.querySelectorAll('input, select').forEach(function (el) {
+                        el.disabled = !show;
+                    });
+                });
+            }
+
+            function syncBuHidden() {
+                var values = [];
+                buCheckboxes.forEach(function (c) { if (c.checked) values.push(c.value); });
+                if (buHidden) buHidden.value = values.join(';');
+            }
+
+            // Keep the hidden canonical Role field in lock-step with the
+            // selected role definition so the existing server-side
+            // validators (which read vm.Role) get the right tier.
+            function syncRoleHidden() {
+                if (roleHidden) roleHidden.value = currentBaseRole();
+            }
+
+            roleSelect.addEventListener('change', function () {
+                syncRoleHidden();
+                populateManagers();
+                syncVisibility();
+            });
+            buCheckboxes.forEach(function (c) { c.addEventListener('change', syncBuHidden); });
+
+            syncRoleHidden();
+            populateManagers();
+            syncVisibility();
+            syncBuHidden();
+        })();
+    </script>
+}

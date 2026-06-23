@@ -1,0 +1,258 @@
+@using AttendanceMonitoring.Services
+@using AttendanceMonitoring.Data
+@using Microsoft.EntityFrameworkCore
+@inject AppDbContext RequestsDb
+@model AttendanceMonitoring.ViewModels.QuotaResetIndexViewModel
+@{
+    ViewData["Title"] = "Break / lunch reset requests";
+
+    var pendingEdit = 0;
+    var pendingLeave = 0;
+    var pendingShift = 0;
+    var pendingQuota = Model.Pending.Count;
+    try { pendingEdit = await RequestsDb.AttendanceEditRequests.CountAsync(r => r.Status == "Pending"); } catch { }
+    try { pendingLeave = await RequestsDb.LeaveRequests.CountAsync(r => r.Status == "Pending"); } catch { }
+    try { pendingShift = await RequestsDb.ScheduleAmendments.CountAsync(r => r.Status == "Pending"); } catch { }
+
+    var viewer = ViewData["ViewerUser"] as User;
+    var tz = (ViewData["TzLabel"] as string) ?? "PHT";
+}
+
+<section class="hero">
+    <div>
+        <h1>Requests</h1>
+        <p class="muted">
+            Approve or reject employee requests to reset their daily
+            break or lunch counter. Approving zeroes the counter for the
+            current @tz day so the employee can take another one.
+        </p>
+    </div>
+</section>
+
+@await Html.PartialAsync("_RequestsTabs", ("quota", pendingEdit, pendingLeave, pendingShift, pendingQuota))
+
+<section class="card">
+    <div class="card-header">
+        <h2>Break / lunch resets &mdash; pending review</h2>
+        <small class="muted">@Model.Pending.Count item@(Model.Pending.Count == 1 ? "" : "s")</small>
+    </div>
+    @if (Model.Pending.Count == 0)
+    {
+        <p class="muted">No pending requests. You're all caught up.</p>
+    }
+    else
+    {
+        @* Bulk-action form wraps the table. Per-row Approve/Reject still
+           live in the rightmost column for one-offs. *@
+        <form method="post"
+              asp-controller="QuotaReset" asp-action="BulkApprove"
+              id="quota-bulk-form">
+            @Html.AntiForgeryToken()
+            <div class="bulk-toolbar" id="quota-bulk-toolbar" hidden>
+                <span><strong id="quota-bulk-count">0</strong> selected</span>
+                <input type="text" name="note" maxlength="500"
+                       placeholder="Optional note (applied to all selected)"
+                       class="note-input" style="flex:1;min-width:220px;" />
+                <button type="submit"
+                        formaction="@Url.Action("BulkApprove", "QuotaReset")"
+                        class="btn btn-success btn-sm"
+                        onclick="return confirm('Approve all selected reset requests?');">
+                    Approve selected
+                </button>
+                <button type="submit"
+                        formaction="@Url.Action("BulkReject", "QuotaReset")"
+                        class="btn btn-danger btn-sm"
+                        onclick="return confirm('Reject all selected reset requests?');">
+                    Reject selected
+                </button>
+                <button type="button" class="btn btn-ghost btn-sm"
+                        id="quota-bulk-deselect">Deselect all</button>
+            </div>
+            <div class="table-wrap">
+                <table class="data-table">
+                    <thead>
+                        <tr>
+                            <th data-no-sort style="width:34px;">
+                                <input type="checkbox" id="quota-master-toggle"
+                                       title="Select / deselect every request" />
+                            </th>
+                            <th>Submitted</th>
+                            <th>Employee</th>
+                            <th>Kind</th>
+                            <th>For date</th>
+                            <th>Reason</th>
+                            <th style="width:280px;">Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var r in Model.Pending)
+                        {
+                            <tr>
+                                <td data-no-sort>
+                                    <input type="checkbox" class="quota-row-toggle"
+                                           name="ids" value="@r.Id" />
+                                </td>
+                                <td>
+                                    @UserClock.Format(viewer, r.RequestedAt, "yyyy-MM-dd HH:mm")
+                                    <br /><small class="muted">@tz</small>
+                                </td>
+                                <td>
+                                    <strong>@(r.User?.FullName ?? "—")</strong><br />
+                                    <small class="muted">@(r.User?.Username ?? "")</small>
+                                </td>
+                                <td>
+                                    <span class="badge badge-pending" style="text-transform:capitalize;">
+                                        @r.Kind
+                                    </span>
+                                </td>
+                                <td>@r.TargetDate.ToString("yyyy-MM-dd")</td>
+                                <td style="max-width:260px;">
+                                    <div style="white-space:pre-wrap;">@r.Reason</div>
+                                </td>
+                                <td data-no-sort>
+                                    <div class="approve-reject">
+                                        <div class="inline">
+                                            <input type="text"
+                                                   form="quota-approve-@r.Id"
+                                                   name="note"
+                                                   placeholder="Optional note"
+                                                   maxlength="500"
+                                                   class="note-input" />
+                                            <button type="submit"
+                                                    form="quota-approve-@r.Id"
+                                                    class="btn btn-success btn-sm"
+                                                    onclick="return confirm('Approve and reset this user\'s @r.Kind counter for today?');">
+                                                Approve
+                                            </button>
+                                        </div>
+                                        <div class="inline" style="margin-top:6px;">
+                                            <input type="text"
+                                                   form="quota-reject-@r.Id"
+                                                   name="note"
+                                                   placeholder="Reason for rejection"
+                                                   maxlength="500"
+                                                   class="note-input" />
+                                            <button type="submit"
+                                                    form="quota-reject-@r.Id"
+                                                    class="btn btn-danger btn-sm">
+                                                Reject
+                                            </button>
+                                        </div>
+                                    </div>
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        </form>
+
+        @* Per-row forms rendered outside the bulk form. *@
+        @foreach (var r in Model.Pending)
+        {
+            <form method="post"
+                  asp-controller="QuotaReset" asp-action="Approve" asp-route-id="@r.Id"
+                  id="quota-approve-@r.Id" style="display:none;">
+                @Html.AntiForgeryToken()
+            </form>
+            <form method="post"
+                  asp-controller="QuotaReset" asp-action="Reject" asp-route-id="@r.Id"
+                  id="quota-reject-@r.Id" style="display:none;">
+                @Html.AntiForgeryToken()
+            </form>
+        }
+
+        <script>
+            (function () {
+                'use strict';
+                var form = document.getElementById('quota-bulk-form');
+                if (!form) return;
+                var master = document.getElementById('quota-master-toggle');
+                var toolbar = document.getElementById('quota-bulk-toolbar');
+                var countEl = document.getElementById('quota-bulk-count');
+                var deselect = document.getElementById('quota-bulk-deselect');
+                var rowBoxes = form.querySelectorAll('input.quota-row-toggle');
+                function update() {
+                    var picked = 0;
+                    rowBoxes.forEach(function (cb) { if (cb.checked) picked++; });
+                    if (countEl) countEl.textContent = picked;
+                    if (toolbar) toolbar.hidden = picked === 0;
+                    if (master) {
+                        master.checked = picked > 0 && picked === rowBoxes.length;
+                        master.indeterminate = picked > 0 && picked < rowBoxes.length;
+                    }
+                }
+                rowBoxes.forEach(function (cb) { cb.addEventListener('change', update); });
+                if (master) {
+                    master.addEventListener('change', function () {
+                        rowBoxes.forEach(function (cb) { cb.checked = master.checked; });
+                        update();
+                    });
+                }
+                if (deselect) {
+                    deselect.addEventListener('click', function () {
+                        rowBoxes.forEach(function (cb) { cb.checked = false; });
+                        update();
+                    });
+                }
+                update();
+            })();
+        </script>
+    }
+</section>
+
+<section class="card">
+    <div class="card-header">
+        <h2>Recently decided</h2>
+        <small class="muted">Last 25 approved / rejected requests.</small>
+    </div>
+    @if (Model.Recent.Count == 0)
+    {
+        <p class="muted">No decisions yet.</p>
+    }
+    else
+    {
+        <div class="table-wrap">
+            <table class="data-table">
+                <thead>
+                    <tr>
+                        <th>Decided</th>
+                        <th>Status</th>
+                        <th>Employee</th>
+                        <th>Kind</th>
+                        <th>For date</th>
+                        <th>Reason</th>
+                        <th>Decided by</th>
+                        <th>Note</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var r in Model.Recent)
+                    {
+                        var pill = r.Status == "Approved" ? "badge-done" : "badge-pending";
+                        <tr>
+                            <td>
+                                @if (r.DecidedAt is not null)
+                                {
+                                    @UserClock.Format(viewer, r.DecidedAt, "yyyy-MM-dd HH:mm")
+                                    <br /><small class="muted">@tz</small>
+                                }
+                            </td>
+                            <td><span class="badge @pill">@r.Status</span></td>
+                            <td>@(r.User?.FullName ?? "—")</td>
+                            <td style="text-transform:capitalize;">@r.Kind</td>
+                            <td>@r.TargetDate.ToString("yyyy-MM-dd")</td>
+                            <td style="max-width:200px;">
+                                <div style="white-space:pre-wrap;">@r.Reason</div>
+                            </td>
+                            <td>@(r.DecidedByUser?.FullName ?? "—")</td>
+                            <td style="max-width:200px;">
+                                <div style="white-space:pre-wrap;">@r.DecisionNote</div>
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    }
+</section>

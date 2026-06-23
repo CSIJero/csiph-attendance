@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <circle cx="32" cy="32" r="31" fill="#1E50A2"/>
+  <text x="32" y="36"
+        font-family="'Arial Black','Helvetica Neue',Arial,sans-serif"
+        font-size="22" font-weight="900"
+        fill="#ffffff" text-anchor="middle"
+        letter-spacing="0.5">CSI</text>
+  <path d="M14 44 Q32 52 50 44 L50 48 Q32 56 14 48 Z" fill="#ffffff"/>
+</svg>

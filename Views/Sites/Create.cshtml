@@ -1,0 +1,74 @@
+@model AttendanceMonitoring.Models.Site
+@{
+    ViewData["Title"] = "Add site";
+}
+
+<section class="hero">
+    <div>
+        <h1>Add site</h1>
+        <p class="muted">
+            Use <a href="https://www.google.com/maps" target="_blank" rel="noopener">Google Maps</a>
+            to grab a building's latitude/longitude — right-click on the spot, the first
+            row in the context menu copies the coordinate pair.
+        </p>
+    </div>
+    <div>
+        <a asp-action="Index" class="btn">&larr; Back</a>
+    </div>
+</section>
+
+<section class="card">
+    <form method="post" asp-action="CreatePost" class="form" id="site-form">
+        @Html.AntiForgeryToken()
+        <label>
+            <span class="field-label">Name <span class="req">*</span></span>
+            <input type="text" asp-for="Name" maxlength="120" required placeholder="e.g. Coalition HQ — Cebu" />
+        </label>
+        <div class="form-row">
+            <label>
+                <span class="field-label">Latitude <span class="req">*</span></span>
+                <input type="number" step="any" asp-for="Latitude" required />
+            </label>
+            <label>
+                <span class="field-label">Longitude <span class="req">*</span></span>
+                <input type="number" step="any" asp-for="Longitude" required />
+            </label>
+            <label>
+                <span class="field-label">Radius (m)</span>
+                <input type="number" min="10" max="5000" asp-for="RadiusMeters" />
+            </label>
+        </div>
+        <button type="button" class="btn" id="btn-fill-here">Use my current location</button>
+        <label>
+            <span class="field-label">Business Unit</span>
+            <input type="text" asp-for="BusinessUnit" maxlength="120" placeholder="Leave blank for all BUs" />
+        </label>
+        <label>
+            <span class="field-label">Notes</span>
+            <textarea asp-for="Notes" maxlength="500" rows="3"></textarea>
+        </label>
+        <label class="checkbox-row">
+            <input type="checkbox" asp-for="IsActive" />
+            <span>Active (check-ins are validated against this site)</span>
+        </label>
+        <div class="form-actions">
+            <button type="submit" class="btn btn-primary">Save site</button>
+            <a asp-action="Index" class="btn">Cancel</a>
+        </div>
+    </form>
+</section>
+
+<script>
+    document.getElementById('btn-fill-here').addEventListener('click', function () {
+        if (!navigator.geolocation) {
+            alert('Geolocation is not available in this browser.');
+            return;
+        }
+        navigator.geolocation.getCurrentPosition(function (pos) {
+            document.querySelector('[name="Latitude"]').value = pos.coords.latitude.toFixed(6);
+            document.querySelector('[name="Longitude"]').value = pos.coords.longitude.toFixed(6);
+        }, function (err) {
+            alert('Could not get location: ' + err.message);
+        }, { enableHighAccuracy: true, timeout: 8000 });
+    });
+</script>

@@ -1,0 +1,114 @@
+@model ScheduleViewModel
+@using AttendanceMonitoring.Services
+@*
+    Renders the per-date schedule editor grouped by week-of-month.
+    Used by Schedule/Index for both editable (admin / support-self)
+    and read-only flows.
+*@
+@{
+    var today = PhTime.Today;
+}
+@if (Model.WeekBuckets.Count == 0)
+{
+    <div class="card">
+        <p class="muted">No dates to show for this filter.</p>
+    </div>
+}
+@foreach (var bucket in Model.WeekBuckets)
+{
+    <section class="card" style="margin-bottom:18px;">
+        <header style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+            <h3 style="margin:0;">Week @bucket.Week</h3>
+            <small class="muted">@bucket.Start.ToString("MMM d") – @bucket.End.ToString("MMM d, yyyy")</small>
+        </header>
+        <div class="table-wrap">
+            <table class="data-table schedule-table">
+                <thead>
+                    <tr>
+                        <th style="width:180px;">Date</th>
+                        <th style="width:140px;">Working Type</th>
+                        <th>Start</th>
+                        <th>End</th>
+                        <th>Hours</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var date in bucket.Dates)
+                    {
+                        var iso = date.ToString("yyyy-MM-dd");
+                        Model.EntriesByDate.TryGetValue(date, out var entry);
+                        var pending = Model.PendingAmendmentsByDate.ContainsKey(date);
+
+                        // Default working week: Monday–Friday, 9:00 AM – 6:00 PM.
+                        // Shown to any regular employee (and to admins editing
+                        // an employee's schedule) so the standard shift is
+                        // visible even before anything has been saved. Admin
+                        // targets carry no schedule, and Support users have a
+                        // 24/7 stance that defaults differently, so we skip the
+                        // prefill for those two roles.
+                        var isWeekday = date.DayOfWeek >= DayOfWeek.Monday
+                                        && date.DayOfWeek <= DayOfWeek.Friday;
+                        var prefillDefault = !Model.IsAdminTarget
+                                             && !Model.IsSupportTarget
+                                             && isWeekday;
+
+                        var isWorking = entry?.IsWorking ?? prefillDefault;
+                        var startStr = entry?.StartTime?.ToString("HH:mm")
+                                       ?? (prefillDefault ? "09:00" : string.Empty);
+                        var endStr = entry?.EndTime?.ToString("HH:mm")
+                                     ?? (prefillDefault ? "18:00" : string.Empty);
+                        var hours = entry?.Hours ?? (prefillDefault ? 9d : 0d);
+                        var workType = entry?.EffectiveWorkType
+                                       ?? (prefillDefault ? "Onsite" : "Dayoff");
+                        var isToday = date == today;
+                        <tr data-row-date="@iso" class="@(isToday ? "is-today" : null)">
+                            <td>
+                                <input type="hidden" name="date_@iso" value="@iso" />
+                                <strong>@date.ToString("ddd, MMM d")</strong>
+                                @if (isToday)
+                                {
+                                    <br /><small class="badge badge-info">today</small>
+                                }
+                                @if (pending)
+                                {
+                                    <br /><small class="badge badge-warning">change pending</small>
+                                }
+                            </td>
+                            <td>
+                                <select name="worktype_@iso"
+                                        data-worktype-date="@iso"
+                                        disabled="@(!Model.Editable)">
+                                    <option value="Onsite"  selected="@(workType.Equals("Onsite", StringComparison.OrdinalIgnoreCase))">Onsite</option>
+                                    <option value="Offsite" selected="@(workType.Equals("Offsite", StringComparison.OrdinalIgnoreCase))">Offsite</option>
+                                    <option value="Dayoff"  selected="@(workType.Equals("Dayoff", StringComparison.OrdinalIgnoreCase))">Dayoff</option>
+                                    <option value="Onleave" selected="@(workType.Equals("Onleave", StringComparison.OrdinalIgnoreCase))">Onleave</option>
+                                    <option value="Holiday" selected="@(workType.Equals("Holiday", StringComparison.OrdinalIgnoreCase))">Holiday</option>
+                                </select>
+                                @* Hidden mirror of the legacy IsWorking flag
+                                   so the existing server-side / JS code that
+                                   reads `working_<iso>` keeps working. The
+                                   dropdown drives its value via JS below. *@
+                                <input type="hidden" name="working_@iso"
+                                        value="@(ScheduleEntry.IsNonWorkingType(workType) ? "" : "on")"
+                                       data-toggle-date="@iso" />
+                            </td>
+                            <td>
+                                <input type="time" name="start_@iso"
+                                       value="@startStr"
+                                       disabled="@(!Model.Editable)"
+                                       data-time-date="@iso" />
+                            </td>
+                            <td>
+                                <input type="time" name="end_@iso"
+                                       value="@endStr"
+                                       disabled="@(!Model.Editable)"
+                                       data-time-date="@iso" />
+                            </td>
+                            <td><span class="muted" data-hours-date="@iso">@hours h</span></td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    </section>
+}

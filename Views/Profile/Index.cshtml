@@ -1,0 +1,198 @@
+@model ProfileViewModel
+@{
+    ViewData["Title"] = "My profile";
+    var me = Model.Me;
+    var viewer = ViewData["ViewerUser"] as User;
+    var tz = (ViewData["TzLabel"] as string) ?? "PHT";
+}
+
+<section class="hero">
+    <div>
+        <h1>My profile</h1>
+        <p class="muted">
+            Personal details on file. To change account fields, please
+            contact your administrator. You can update your password from
+            this page.
+        </p>
+    </div>
+    <div class="hero-actions">
+        <a class="btn btn-secondary" asp-controller="Account" asp-action="ChangePassword">
+            Change password
+        </a>
+    </div>
+</section>
+
+<section class="card">
+    <div class="card-header">
+        <h2>Account</h2>
+        <small class="muted">
+            Signed in as <strong>@me.Username</strong>
+        </small>
+    </div>
+    <div class="table-wrap">
+        <table class="data-table">
+            <tbody>
+                <tr>
+                    <th style="width:200px;">Full name</th>
+                    <td>@me.FullName</td>
+                </tr>
+                <tr>
+                    <th>Username</th>
+                    <td>@me.Username</td>
+                </tr>
+                <tr>
+                    <th>Email</th>
+                    <td>@me.Email</td>
+                </tr>
+                <tr>
+                    <th>Employee ID</th>
+                    <td>
+                        @if (!string.IsNullOrWhiteSpace(me.EmployeeId))
+                        {
+                            @me.EmployeeId
+                        }
+                        else
+                        {
+                            <span class="muted">&mdash;</span>
+                        }
+                    </td>
+                </tr>
+                <tr>
+                    <th>Business Unit</th>
+                    <td>
+                        @{
+                            // Single-BU users (Employee / PM-as-in-Project Manager)
+                            // use the BusinessUnit column. Program Managers may
+                            // cover multiple BUs and store them in BusinessUnits
+                            // (semicolon-separated). Show whichever is populated;
+                            // for PMs, render the parsed list as comma-separated.
+                            var buSingle = me.BusinessUnit;
+                            var buMulti = me.BusinessUnitList;
+                        }
+                        @if (!string.IsNullOrWhiteSpace(buSingle))
+                        {
+                            @buSingle
+                        }
+                        else if (buMulti.Count > 0)
+                        {
+                            @string.Join(", ", buMulti)
+                        }
+                        else
+                        {
+                            <span class="muted">&mdash;</span>
+                        }
+                    </td>
+                </tr>
+                <tr>
+                    <th>Role</th>
+                    <td>
+                        <span class="badge badge-active">@me.Role</span>
+                        @if (me.RoleLabel is { } rl && !string.IsNullOrWhiteSpace(rl.Name))
+                        {
+                            <small class="muted">&middot; @rl.Name</small>
+                        }
+                    </td>
+                </tr>
+                @if (me.Manager is { } mgr)
+                {
+                    <tr>
+                        <th>Reports to</th>
+                        <td>@mgr.FullName <small class="muted">(@mgr.Role)</small></td>
+                    </tr>
+                }
+                <tr>
+                    <th>Support rotation</th>
+                    <td>
+                        @if (me.IsSupport)
+                        {
+                            <span class="badge badge-active">Support (24/7)</span>
+                        }
+                        else
+                        {
+                            <span class="muted">No</span>
+                        }
+                    </td>
+                </tr>
+                <tr>
+                    <th>Account created</th>
+                    <td>@UserClock.Format(viewer, me.CreatedAt, "yyyy-MM-dd HH:mm") @tz</td>
+                </tr>
+                @if (me.LastLoginAt is not null)
+                {
+                    <tr>
+                        <th>Last sign-in</th>
+                        <td>
+                            @UserClock.Format(viewer, me.LastLoginAt, "yyyy-MM-dd HH:mm") @tz
+                            @if (!string.IsNullOrEmpty(me.LastLoginLocation))
+                            {
+                                <text> &middot; <span class="muted">@me.LastLoginLocation</span></text>
+                            }
+                            else if (!string.IsNullOrEmpty(me.LastLoginHost))
+                            {
+                                <text> &middot; <span class="muted">@me.LastLoginHost</span></text>
+                            }
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+</section>
+
+<section class="kpis">
+    <div class="kpi kpi-present">
+        <div class="kpi-label">Working days / week</div>
+        <div class="kpi-value">@Model.WorkingDays</div>
+    </div>
+    <div class="kpi kpi-online">
+        <div class="kpi-label">Scheduled hours / week</div>
+        <div class="kpi-value">@Model.WeeklyHours</div>
+    </div>
+    <div class="kpi kpi-total">
+        <div class="kpi-label">Last 7 entries</div>
+        <div class="kpi-value">@PhTime.FormatDurationLong(Model.RecentMinutes)</div>
+    </div>
+</section>
+
+<section class="card">
+    <div class="card-header">
+        <h2>This week</h2>
+        <small class="muted">Week of @Model.WeekStart.ToString("MMM d, yyyy") &middot; set by your administrator.</small>
+    </div>
+    <div class="schedule-grid">
+        @foreach (var entry in Model.Schedule)
+        {
+            var classes = new List<string> { "schedule-day" };
+            if (entry.WorkDate == PhTime.Today) classes.Add("is-today");
+            if (!entry.IsWorking) classes.Add("is-off");
+            Model.WeekHolidays.TryGetValue(entry.WorkDate, out var holiday);
+            <div class="@string.Join(' ', classes)">
+                <div class="schedule-day-name">@entry.WorkDate.ToString("ddd, MMM d")</div>
+                @if (entry.IsWorking
+                     && entry.StartTime is { } st
+                     && entry.EndTime is { } et)
+                {
+                    <div class="schedule-day-time">
+                        @st.ToString("HH:mm") &ndash; @et.ToString("HH:mm")
+                    </div>
+                    <div class="schedule-day-hours muted">@entry.Hours h</div>
+                }
+                else
+                {
+                    var nonWorkingLabel = entry.EffectiveWorkType;
+                    if (string.Equals(nonWorkingLabel, "Dayoff", StringComparison.OrdinalIgnoreCase))
+                    {
+                        nonWorkingLabel = "Day off";
+                    }
+                    <div class="schedule-day-time muted">@nonWorkingLabel</div>
+                }
+                @if (holiday is not null)
+                {
+                    <div class="schedule-day-note">
+                        <span class="badge badge-warn">Holiday</span> @holiday.Name
+                    </div>
+                }
+            </div>
+        }
+    </div>
+</section>

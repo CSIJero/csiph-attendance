@@ -1,0 +1,74 @@
+@model List<AttendanceMonitoring.Models.Site>
+@{
+    ViewData["Title"] = "Sites";
+}
+
+<section class="hero">
+    <div>
+        <h1>Office Sites</h1>
+        <p class="muted">
+            Onsite check-ins must fall within an active site's radius.
+            Leave the Business Unit blank to make a site valid for every BU.
+        </p>
+    </div>
+    <div>
+        <a class="btn btn-primary" asp-action="Create">+ Add site</a>
+    </div>
+</section>
+
+<section class="card">
+    <div class="card-header">
+        <h2>Configured sites</h2>
+        <small class="muted">@Model.Count total</small>
+    </div>
+    <div class="table-wrap">
+        <table class="data-table sortable">
+            <thead>
+                <tr>
+                    <th>Name</th>
+                    <th>Business Unit</th>
+                    <th>Coordinates</th>
+                    <th>Radius (m)</th>
+                    <th>Status</th>
+                    <th style="width:160px;" data-no-sort></th>
+                </tr>
+            </thead>
+            <tbody>
+                @if (Model.Count == 0)
+                {
+                    <tr><td colspan="6" class="muted text-center">No sites configured. Onsite check-ins are unrestricted until you add one.</td></tr>
+                }
+                else
+                {
+                    foreach (var s in Model)
+                    {
+                        <tr>
+                            <td><strong>@s.Name</strong></td>
+                            <td>@(s.BusinessUnit ?? "All BUs")</td>
+                            <td><code>@s.Latitude.ToString("F5"), @s.Longitude.ToString("F5")</code></td>
+                            <td class="text-right">@s.RadiusMeters</td>
+                            <td>
+                                @if (s.IsActive)
+                                {
+                                    <span class="pill pill-ok">Active</span>
+                                }
+                                else
+                                {
+                                    <span class="pill pill-off">Inactive</span>
+                                }
+                            </td>
+                            <td class="row-actions">
+                                <a class="btn btn-sm" asp-action="Edit" asp-route-id="@s.Id">Edit</a>
+                                <form method="post" asp-action="Delete" asp-route-id="@s.Id"
+                                      onsubmit="return confirm('Remove this site?');" style="display:inline;">
+                                    @Html.AntiForgeryToken()
+                                    <button type="submit" class="btn btn-sm btn-danger">Delete</button>
+                                </form>
+                            </td>
+                        </tr>
+                    }
+                }
+            </tbody>
+        </table>
+    </div>
+</section>

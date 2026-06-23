@@ -1,0 +1,285 @@
+@using AttendanceMonitoring.Services
+@using AttendanceMonitoring.Data
+@using Microsoft.EntityFrameworkCore
+@inject AppDbContext AmendDb
+@model AttendanceMonitoring.ViewModels.ScheduleAmendmentsViewModel
+@{
+    ViewData["Title"] = "Shift-change requests";
+
+    var pendingEdit = 0;
+    var pendingLeave = 0;
+    var pendingShift = Model.Pending.Count;
+    var pendingQuota = 0;
+    try
+    {
+        pendingEdit = await AmendDb.AttendanceEditRequests.CountAsync(r => r.Status == "Pending");
+    }
+    catch { /* table may not exist yet on first deploy */ }
+    try
+    {
+        pendingLeave = await AmendDb.LeaveRequests.CountAsync(r => r.Status == "Pending");
+    }
+    catch { /* table may not exist yet on first deploy */ }
+    try
+    {
+        pendingQuota = await AmendDb.QuotaResetRequests.CountAsync(r => r.Status == "Pending");
+    }
+    catch { /* table may not exist yet on first deploy */ }
+
+    var viewer = ViewData["ViewerUser"] as User;
+
+    string StatusPill(string s) => s switch
+    {
+        "Approved" => "badge-done",
+        "Rejected" => "badge-pending",
+        "Cancelled" => "badge-warn",
+        _ => "badge-active",
+    };
+
+    string Slot(AttendanceMonitoring.Models.ScheduleAmendment a) =>
+        a.ProposedIsWorking
+            ? $"{a.ProposedStartTime:HH\\:mm} → {a.ProposedEndTime:HH\\:mm}"
+            : "Day off";
+}
+
+<section class="hero">
+    <div>
+        <h1>Requests</h1>
+        <p class="muted">
+            Review employee requests for attendance corrections, leave of
+            absence, and shift changes. Use the tabs below to switch
+            between the queues.
+        </p>
+    </div>
+</section>
+
+@await Html.PartialAsync("_RequestsTabs", ("shifts", pendingEdit, pendingLeave, pendingShift, pendingQuota))
+
+<section class="card">
+    <div class="card-header">
+        <h2>Shift changes &mdash; pending review</h2>
+        <small class="muted">@Model.Pending.Count item@(Model.Pending.Count == 1 ? "" : "s")</small>
+    </div>
+    @if (Model.Pending.Count == 0)
+    {
+        <p class="muted" style="padding:14px 20px 6px 20px;">No pending shift-change requests.</p>
+    }
+    else
+    {
+        @* Bulk-action form wraps the table. Per-row Approve/Reject details
+           still work for one-off decisions; bulk uses the shared note. *@
+        <form method="post"
+              asp-controller="Schedule" asp-action="BulkApproveAmendments"
+              id="shifts-bulk-form">
+            @Html.AntiForgeryToken()
+            <div class="bulk-toolbar" id="shifts-bulk-toolbar" hidden>
+                <span><strong id="shifts-bulk-count">0</strong> selected</span>
+                <input type="text" name="decisionNote" maxlength="500"
+                       placeholder="Optional note (applied to all selected)"
+                       class="note-input" style="flex:1;min-width:220px;" />
+                <button type="submit"
+                        formaction="@Url.Action("BulkApproveAmendments", "Schedule")"
+                        class="btn btn-success btn-sm"
+                        onclick="return confirm('Approve all selected shift-change requests?');">
+                    Approve selected
+                </button>
+                <button type="submit"
+                        formaction="@Url.Action("BulkRejectAmendments", "Schedule")"
+                        class="btn btn-danger btn-sm"
+                        onclick="return confirm('Reject all selected shift-change requests?');">
+                    Reject selected
+                </button>
+                <button type="button" class="btn btn-ghost btn-sm"
+                        id="shifts-bulk-deselect">Deselect all</button>
+            </div>
+            <div class="table-wrap">
+                <table class="data-table">
+                    <thead>
+                        <tr>
+                            <th data-no-sort style="width:34px;">
+                                <input type="checkbox" id="shifts-master-toggle"
+                                       title="Select / deselect every request" />
+                            </th>
+                            <th>Employee</th>
+                            <th>Day</th>
+                            <th>Proposed</th>
+                            <th>Hours</th>
+                            <th>Reason</th>
+                            <th>Proof</th>
+                            <th>Submitted</th>
+                            <th>Action</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var a in Model.Pending)
+                        {
+                            <tr>
+                                <td data-no-sort>
+                                    <input type="checkbox" class="shifts-row-toggle"
+                                           name="ids" value="@a.Id" />
+                                </td>
+                                <td>
+                                    <strong>@a.User?.FullName</strong>
+                                    @if (!string.IsNullOrEmpty(a.User?.BusinessUnit))
+                                    {
+                                        <br /><small class="muted">@a.User.BusinessUnit</small>
+                                    }
+                                </td>
+                                <td>@a.WorkDate.ToString("ddd, MMM d, yyyy")</td>
+                                <td>@Slot(a)</td>
+                                <td><small class="muted">@a.ProposedHours h</small></td>
+                                <td style="max-width:320px;">@a.Reason</td>
+                                <td>
+                                    @if (!string.IsNullOrEmpty(a.ProofPhoto))
+                                    {
+                                        <a href="@a.ProofPhoto" target="_blank">
+                                            <img src="@a.ProofPhoto" alt="Proof" style="max-width:80px;max-height:60px;border-radius:4px;cursor:pointer;" />
+                                        </a>
+                                    }
+                                    else
+                                    {
+                                        <span class="muted">—</span>
+                                    }
+                                </td>
+                                <td><small class="muted">@UserClock.Format(viewer, a.RequestedAt, "MMM d, h:mm tt")</small></td>
+                                <td data-no-sort>
+                                    <details class="inline-decide">
+                                        <summary class="btn btn-sm btn-primary">Approve</summary>
+                                        <div class="inline-decide-form">
+                                            <textarea form="shifts-approve-@a.Id"
+                                                      name="decisionNote" maxlength="500" rows="2"
+                                                      placeholder="Optional note for the requester"></textarea>
+                                            <button type="submit"
+                                                    form="shifts-approve-@a.Id"
+                                                    class="btn btn-sm btn-primary">Confirm approve</button>
+                                        </div>
+                                    </details>
+                                    <details class="inline-decide">
+                                        <summary class="btn btn-sm">Reject</summary>
+                                        <div class="inline-decide-form">
+                                            <textarea form="shifts-reject-@a.Id"
+                                                      name="decisionNote" maxlength="500" rows="2"
+                                                      placeholder="Reason for rejection"></textarea>
+                                            <button type="submit"
+                                                    form="shifts-reject-@a.Id"
+                                                    class="btn btn-sm">Confirm reject</button>
+                                        </div>
+                                    </details>
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        </form>
+
+        @* Per-row forms rendered outside the bulk form. *@
+        @foreach (var a in Model.Pending)
+        {
+            <form method="post"
+                  asp-controller="Schedule" asp-action="ApproveAmendment" asp-route-id="@a.Id"
+                  id="shifts-approve-@a.Id" style="display:none;">
+                @Html.AntiForgeryToken()
+            </form>
+            <form method="post"
+                  asp-controller="Schedule" asp-action="RejectAmendment" asp-route-id="@a.Id"
+                  id="shifts-reject-@a.Id" style="display:none;">
+                @Html.AntiForgeryToken()
+            </form>
+        }
+
+        <script>
+            (function () {
+                'use strict';
+                var form = document.getElementById('shifts-bulk-form');
+                if (!form) return;
+                var master = document.getElementById('shifts-master-toggle');
+                var toolbar = document.getElementById('shifts-bulk-toolbar');
+                var countEl = document.getElementById('shifts-bulk-count');
+                var deselect = document.getElementById('shifts-bulk-deselect');
+                var rowBoxes = form.querySelectorAll('input.shifts-row-toggle');
+                function update() {
+                    var picked = 0;
+                    rowBoxes.forEach(function (cb) { if (cb.checked) picked++; });
+                    if (countEl) countEl.textContent = picked;
+                    if (toolbar) toolbar.hidden = picked === 0;
+                    if (master) {
+                        master.checked = picked > 0 && picked === rowBoxes.length;
+                        master.indeterminate = picked > 0 && picked < rowBoxes.length;
+                    }
+                }
+                rowBoxes.forEach(function (cb) { cb.addEventListener('change', update); });
+                if (master) {
+                    master.addEventListener('change', function () {
+                        rowBoxes.forEach(function (cb) { cb.checked = master.checked; });
+                        update();
+                    });
+                }
+                if (deselect) {
+                    deselect.addEventListener('click', function () {
+                        rowBoxes.forEach(function (cb) { cb.checked = false; });
+                        update();
+                    });
+                }
+                update();
+            })();
+        </script>
+    }
+</section>
+
+@if (Model.Recent.Count > 0)
+{
+    <section class="card">
+        <div class="card-header">
+            <h2>Recent decisions</h2>
+            <small class="muted">Last @Model.Recent.Count item@(Model.Recent.Count == 1 ? "" : "s")</small>
+        </div>
+        <div class="table-wrap">
+            <table class="data-table">
+                <thead>
+                    <tr>
+                        <th>Employee</th>
+                        <th>Day</th>
+                        <th>Proposed</th>
+                        <th>Status</th>
+                        <th>Proof</th>
+                        <th>Decided by</th>
+                        <th>Decided</th>
+                        <th>Note</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var a in Model.Recent)
+                    {
+                        <tr>
+                            <td>@a.User?.FullName</td>
+                            <td>@a.WorkDate.ToString("ddd, MMM d, yyyy")</td>
+                            <td>@Slot(a)</td>
+                            <td><span class="badge @StatusPill(a.Status)">@a.Status</span></td>
+                            <td>
+                                @if (!string.IsNullOrEmpty(a.ProofPhoto))
+                                {
+                                    <a href="@a.ProofPhoto" target="_blank">
+                                        <img src="@a.ProofPhoto" alt="Proof" style="max-width:80px;max-height:60px;border-radius:4px;cursor:pointer;" />
+                                    </a>
+                                }
+                                else
+                                {
+                                    <span class="muted">—</span>
+                                }
+                            </td>
+                            <td>@(a.DecidedByUser?.FullName ?? "—")</td>
+                            <td>
+                                @if (a.DecidedAt.HasValue)
+                                {
+                                    <small class="muted">@UserClock.Format(viewer, a.DecidedAt, "MMM d, h:mm tt")</small>
+                                }
+                            </td>
+                            <td><small class="muted">@a.DecisionNote</small></td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    </section>
+}

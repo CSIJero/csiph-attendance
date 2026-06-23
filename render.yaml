@@ -1,0 +1,61 @@
+# Render Blueprint — lets a freshly forked repo be deployed by clicking
+# "New + → Blueprint" on https://render.com and selecting this repo.
+#
+# Free tier notes:
+#   - Web service: 512 MB RAM, 0.1 CPU, sleeps after 15 min of inactivity
+#     (wakes on next request, ~30 s cold-start).
+#   - Postgres (free): 1 GB storage, expires after 90 days but can be
+#     replaced (data exportable via pg_dump). Keep weekly backups.
+#   - Custom domains (e.g. csi-attendance.is-a.dev) are free; add them
+#     under Settings → Custom Domains once the service is up.
+#
+# After importing this blueprint, set the Email__Username / Email__Password
+# environment variables in the Render dashboard with your real SMTP creds.
+
+databases:
+  - name: csiph-db
+    plan: free
+    databaseName: csiph_attendance
+    user: csiph_user
+    region: singapore
+
+services:
+  - type: web
+    name: csiph-attendance
+    runtime: docker
+    plan: free
+    region: singapore
+    branch: main
+    autoDeploy: true
+    healthCheckPath: /Account/Login
+    envVars:
+      - key: ASPNETCORE_ENVIRONMENT
+        value: Production
+      - key: AttendanceMonitoring__RequireSecureCookie
+        value: "true"
+      - key: AttendanceMonitoring__OnlineThresholdSeconds
+        value: "600"
+      - key: AttendanceMonitoring__SessionLifetimeHours
+        value: "12"
+      # Render injects the Postgres URL here. Program.cs detects the
+      # "postgres://" prefix and switches to Npgsql automatically.
+      - key: ConnectionStrings__DefaultConnection
+        fromDatabase:
+          name: csiph-db
+          property: connectionString
+      # Email — Render's free tier blocks outbound SMTP (ports 25/465/587),
+      # so we send via Brevo's HTTPS transactional API instead. Provider
+      # values supported: "Brevo" (HTTP API, recommended on Render),
+      # "Smtp" (only works on paid Render plans), "Outlook" (local dev).
+      - key: Email__Provider
+        value: Brevo
+      - key: Email__Enabled
+        value: "true"
+      - key: Email__FromAddress
+        value: csi.attendance.monitor@gmail.com
+      - key: Email__FromName
+        value: CSI Attendance Monitor
+      # = the Brevo v3 API key from app.brevo.com/settings/keys/api
+      # (the long "xkeysib-..." key, NOT the SMTP password).
+      - key: Email__Password
+        sync: false   # set in Render dashboard

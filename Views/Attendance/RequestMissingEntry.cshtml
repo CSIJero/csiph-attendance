@@ -1,0 +1,200 @@
+@model AddTimeEntryViewModel
+@{
+    ViewData["Title"] = "Add Time Entry";
+}
+@if (!Model.ViewerIsAdmin)
+{
+    @* Mirror the employee Requests sub-tab strip so the user keeps a
+       consistent nav while filing an Add Time Entry. The strip lives on
+       Leave/Index for the other two queues. *@
+    <nav class="subtabs" aria-label="My requests sub-navigation">
+        <a class="subtab" asp-controller="Leave" asp-action="Index" asp-route-tab="leave">
+            <span>Leave of absence</span>
+        </a>
+        <a class="subtab" asp-controller="Leave" asp-action="Index" asp-route-tab="shift">
+            <span>Shift changes</span>
+        </a>
+        <a class="subtab subtab-active" asp-controller="Attendance" asp-action="RequestMissingEntry">
+            <span>Add time entry</span>
+        </a>
+    </nav>
+}
+
+<section class="hero">
+    <div>
+        <h1>Add Time Entry</h1>
+        <p class="muted">
+            Use this form when a check-in or check-out is missing for one of
+            your scheduled working days. Only dates that appear on your
+            schedule and don't already have an attendance record can be added.
+            @if (Model.ViewerIsAdmin)
+            {
+                <text>As an admin / PM you can also file on behalf of any employee in your scope by picking a name below.</text>
+            }
+        </p>
+    </div>
+</section>
+
+<section class="card">
+    <form asp-action="RequestMissingEntryPost" method="post" class="stacked-form" id="add-time-entry-form">
+        @if (Model.ViewerIsAdmin && Model.CandidateUsers.Count > 0)
+        {
+            <label>
+                <span>Employee</span>
+                <select id="user_id" name="user_id">
+                    <option value="">— Yourself —</option>
+                    @foreach (var u in Model.CandidateUsers)
+                    {
+                        <option value="@u.Id">@u.FullName@(string.IsNullOrEmpty(u.EmployeeId) ? "" : $" ({u.EmployeeId})")</option>
+                    }
+                </select>
+                <small class="muted">Leave blank to file for yourself. The list of dates below refreshes when you pick someone.</small>
+            </label>
+        }
+
+        <label>
+            <span>Work date</span>
+            <select id="work_date" name="work_date" required>
+                @if (Model.EligibleDates.Count == 0)
+                {
+                    <option value="">No eligible scheduled days without an entry</option>
+                }
+                else
+                {
+                    <option value="">— Select a date —</option>
+                    @foreach (var d in Model.EligibleDates)
+                    {
+                        <option value="@d.ToString("yyyy-MM-dd")">@d.ToString("ddd, yyyy-MM-dd")</option>
+                    }
+                }
+            </select>
+            <small class="muted">Only scheduled working days from the last 30 days that have no attendance record yet are shown.</small>
+        </label>
+
+        <label>
+            <span>Check-in time</span>
+            <input type="time" id="check_in_time" required step="60" />
+            <small class="muted">Enter the time only — the work date above is used automatically.</small>
+        </label>
+
+        <label>
+            <span>Check-out time <small class="muted">— optional, leave blank to keep open</small></span>
+            <input type="time" id="check_out_time" step="60" />
+            <small class="muted">If earlier than the check-in time, it's treated as the next day (overnight shift).</small>
+        </label>
+
+        <label>
+            <span>Reason</span>
+            <textarea id="reason" name="reason" required minlength="5" rows="3"></textarea>
+        </label>
+
+        <label>
+            <span>Image proof <small class="muted">— required</small></span>
+            <input type="file" id="proof_picker" accept="image/*" required />
+            <small class="muted">Upload a screenshot or photo as evidence for this time adjustment.</small>
+        </label>
+
+        @* Hidden fields posted to the controller: check_in / check_out are
+           composed from work_date + the time inputs on submit; proof_photo
+           gets the base64 data URL produced by the file reader below. *@
+        <input type="hidden" id="check_in" name="check_in" />
+        <input type="hidden" id="check_out" name="check_out" />
+        <input type="hidden" id="proof_photo" name="proof_photo" />
+
+        <div class="form-actions">
+            <button type="submit" class="btn btn-primary">Submit request</button>
+            <a class="btn" asp-controller="Leave" asp-action="Index">Cancel</a>
+        </div>
+    </form>
+</section>
+
+<script>
+(function () {
+    // ---- File -> base64 data URL for proof_photo --------------------
+    const picker = document.getElementById('proof_picker');
+    const hiddenProof = document.getElementById('proof_photo');
+    if (picker && hiddenProof) {
+        picker.addEventListener('change', function () {
+            const file = picker.files && picker.files[0];
+            if (!file) { hiddenProof.value = ''; return; }
+            const reader = new FileReader();
+            reader.onload = function (e) {
+                hiddenProof.value = (e.target && e.target.result) ? String(e.target.result) : '';
+            };
+            reader.readAsDataURL(file);
+        });
+    }
+
+    // ---- Combine work_date + time-only inputs into datetime-local ---
+    // Server expects yyyy-MM-ddTHH:mm in the check_in / check_out hidden
+    // fields. If the check-out time is earlier than the check-in time we
+    // treat it as the following day to support overnight shifts.
+    const form = document.getElementById('add-time-entry-form');
+    const dateSel = document.getElementById('work_date');
+    const ciTime = document.getElementById('check_in_time');
+    const coTime = document.getElementById('check_out_time');
+    const ciHidden = document.getElementById('check_in');
+    const coHidden = document.getElementById('check_out');
+
+    function addOneDay(iso) {
+        const d = new Date(iso + 'T00:00:00');
+        d.setDate(d.getDate() + 1);
+        const yyyy = d.getFullYear();
+        const mm = String(d.getMonth() + 1).padStart(2, '0');
+        const dd = String(d.getDate()).padStart(2, '0');
+        return `${yyyy}-${mm}-${dd}`;
+    }
+
+    if (form && dateSel && ciTime && coTime && ciHidden && coHidden) {
+        form.addEventListener('submit', function () {
+            const wd = (dateSel.value || '').trim();
+            const ci = (ciTime.value || '').trim();
+            const co = (coTime.value || '').trim();
+            ciHidden.value = (wd && ci) ? `${wd}T${ci}` : '';
+            if (wd && co) {
+                // If check-out time is earlier than (or equal to) check-in,
+                // assume the shift crossed midnight and roll forward one day.
+                const coDate = (ci && co <= ci) ? addOneDay(wd) : wd;
+                coHidden.value = `${coDate}T${co}`;
+            } else {
+                coHidden.value = '';
+            }
+        });
+    }
+
+    // ---- Admin: refresh date list when picking a different employee -
+    const userSel = document.getElementById('user_id');
+    if (userSel && dateSel) {
+        userSel.addEventListener('change', async function () {
+            const uid = userSel.value || '';
+            const url = '@Url.Action("EligibleAddTimeEntryDates", "Attendance")'
+                + (uid ? ('?user_id=' + encodeURIComponent(uid)) : '');
+            try {
+                const resp = await fetch(url, { credentials: 'same-origin' });
+                if (!resp.ok) return;
+                const dates = await resp.json();
+                dateSel.innerHTML = '';
+                if (!dates || dates.length === 0) {
+                    const opt = document.createElement('option');
+                    opt.value = '';
+                    opt.textContent = 'No eligible scheduled days without an entry';
+                    dateSel.appendChild(opt);
+                    return;
+                }
+                const placeholder = document.createElement('option');
+                placeholder.value = '';
+                placeholder.textContent = '— Select a date —';
+                dateSel.appendChild(placeholder);
+                for (const iso of dates) {
+                    const opt = document.createElement('option');
+                    opt.value = iso;
+                    const d = new Date(iso + 'T00:00:00');
+                    const dow = d.toLocaleDateString(undefined, { weekday: 'short' });
+                    opt.textContent = dow + ', ' + iso;
+                    dateSel.appendChild(opt);
+                }
+            } catch (e) { /* swallow */ }
+        });
+    }
+})();
+</script>

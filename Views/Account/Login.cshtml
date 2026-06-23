@@ -1,0 +1,48 @@
+@model LoginViewModel
+@{
+    Layout = "_AuthLayout";
+    ViewData["Title"] = "Sign in";
+}
+
+<div class="auth-card-v2">
+    <div class="auth-card-head auth-card-head-brand">
+        <div class="auth-brand">
+            <img src="~/images/logo-mark.svg" alt="CSI" class="auth-brand-mark" />
+            <div class="auth-brand-text">
+                <div class="auth-brand-name">CSI Interfusion</div>
+                <div class="auth-brand-sub">Attendance Monitor</div>
+            </div>
+        </div>
+    </div>
+    <div class="auth-card-body">
+        <form method="post" asp-controller="Account" asp-action="Login"
+              asp-route-returnUrl="@(ViewData["ReturnUrl"] as string)">
+            @Html.AntiForgeryToken()
+
+            <label class="auth-label">
+                <span class="auth-label-text">Username</span>
+                <input type="text" name="Username" autofocus required
+                       autocomplete="username"
+                       value="@Model.Username" />
+            </label>
+
+            <label class="auth-label">
+                <span class="auth-label-text">Password</span>
+                <input type="password" name="Password" required
+                       autocomplete="current-password" />
+            </label>
+
+            <div class="auth-actions">
+                <button type="submit" class="btn-auth">Login</button>
+                <a asp-controller="Account" asp-action="ForgotPassword">Forgot password?</a>
+            </div>
+        </form>
+    </div>
+</div>
+
+<div class="auth-links">
+    <div class="auth-links-row">
+        Don't have an account?
+        <a asp-controller="Account" asp-action="Register">Register here</a>
+    </div>
+</div>

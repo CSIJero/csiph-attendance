@@ -1,0 +1,36 @@
+# Build outputs
+[Bb]in/
+[Oo]bj/
+out/
+publish/
+
+# Visual Studio / Rider / VS Code
+.vs/
+.idea/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+
+# Local DB
+*.db
+*.db-shm
+*.db-wal
+*.db.bak
+*.sqlite
+*.dump
+*.sql.gz
+*.sha256.txt
+backups/
+
+# Secrets / local config
+.env
+appsettings.*.local.json
+
+# OS
+Thumbs.db
+.DS_Store
+
+# Misc
+*.log
+send-test-email.ps1
