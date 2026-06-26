@@ -330,11 +330,12 @@ public class OfflineNotifierService : BackgroundService
             }
 
             var minutes = (int)Math.Round(offlineFor.TotalMinutes);
+            var isEmployee = string.Equals(u.Role, Roles.Employee, StringComparison.OrdinalIgnoreCase);
             var recipientsOffline = BuildRecipients(
                 opts,
                 TeamManagerRecipientsFor(u),
                 u,
-                includeManagers: minutes >= 60);
+                includeManagers: isEmployee && minutes >= 60);
             var (offlineSubject, offlineBody) = BuildMessage(toSend, u, att, minutes, lastUtc, opts.OfflineThresholdMinutes);
 
             var offKey = $"offline:{att.Id}:{toSend}";
