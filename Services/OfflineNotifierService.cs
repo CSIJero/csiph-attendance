@@ -193,6 +193,7 @@ public class OfflineNotifierService : BackgroundService
             var u = att.User;
             if (u is null) continue;
             if (string.Equals(u.Role, Roles.Admin, StringComparison.OrdinalIgnoreCase)) continue;
+            var isEmployee = string.Equals(u.Role, Roles.Employee, StringComparison.OrdinalIgnoreCase);
 
             // Policy: pause ALL notification emails on statutory holidays
             // for the user's local date. Keep auto-close behavior active
@@ -202,7 +203,7 @@ public class OfflineNotifierService : BackgroundService
 
             await HandleCutoffAsync(
                 db, email, opts, att, u, nowUtc, ct,
-                sendNotifications: !isHolidayToday);
+                sendNotifications: !isHolidayToday && isEmployee);
 
             if (isHolidayToday) continue;
 
@@ -212,7 +213,7 @@ public class OfflineNotifierService : BackgroundService
             // we detect the check-in is past the shift start + grace.
             // LateCheck handles per-region grace (PH Onsite 15 / PH Offsite 0
             // / India 60). Support / Dayoff / Admin all return NotApplicable.
-            if (!state.LateAlertSent)
+            if (isEmployee && !state.LateAlertSent)
             {
                 var lateOffset = UserClock.OffsetFor(u);
                 var ciUtc = DateTime.SpecifyKind(att.CheckIn, DateTimeKind.Utc);
@@ -238,7 +239,7 @@ public class OfflineNotifierService : BackgroundService
                 }
             }
 
-            if (!state.ForgotCheckoutSent)
+            if (isEmployee && !state.ForgotCheckoutSent)
             {
                 // Primary trigger: 5 minutes before the user's scheduled
                 // end-of-shift (anchored to the check-in's local date so an
@@ -270,11 +271,11 @@ public class OfflineNotifierService : BackgroundService
                 bool shouldFire;
                 if (scheduledEndLocal is { } endLocal)
                 {
-                    // Fire when we're within 5 minutes of scheduled end, or
-                    // already past it. The one-shot `ForgotCheckoutSent`
-                    // flag below keeps us from spamming after the first send.
+                    // Fire 5 minutes AFTER scheduled end. The one-shot
+                    // `ForgotCheckoutSent` flag below keeps us from spamming
+                    // after the first send.
                     var minsUntilEnd = (endLocal - nowLocal).TotalMinutes;
-                    shouldFire = minsUntilEnd <= 5;
+                    shouldFire = minsUntilEnd <= -5;
                 }
                 else
                 {
@@ -286,11 +287,21 @@ public class OfflineNotifierService : BackgroundService
 
                 if (shouldFire)
                 {
+                    // Re-check right before send in case another request
+                    // clocked the user out after we loaded open sessions.
+                    var stillOpen = await db.Attendances.AnyAsync(
+                        a => a.Id == att.Id && a.CheckOut == null, ct);
+                    if (!stillOpen)
+                    {
+                        state.ForgotCheckoutSent = true;
+                        continue;
+                    }
+
                     var key = $"forgot:{att.Id}";
                     if (ShouldSend(key, TimeSpan.FromHours(12), nowUtc))
                     {
                         var recipients = BuildRecipients(opts, null, u, includeManagers: false);
-                        var (subject, body) = BuildForgotCheckoutMessage(u, att, elapsedMin, requiredMin);
+                        var (subject, body) = BuildForgotCheckoutMessage(u, att, elapsedMin, requiredMin, schedule);
                         await TrySendAndRecordAsync(db, email, AlertLevel.ForgotCheckout, u, recipients, subject, body, elapsedMin, ct);
                         state.ForgotCheckoutSent = true;
                     }
@@ -330,7 +341,7 @@ public class OfflineNotifierService : BackgroundService
             }
 
             var minutes = (int)Math.Round(offlineFor.TotalMinutes);
-            var isEmployee = string.Equals(u.Role, Roles.Employee, StringComparison.OrdinalIgnoreCase);
+            if (!isEmployee) continue;
             var recipientsOffline = BuildRecipients(
                 opts,
                 TeamManagerRecipientsFor(u),
@@ -355,7 +366,7 @@ public class OfflineNotifierService : BackgroundService
         CancellationToken ct)
     {
         var users = await db.Users
-            .Where(u => !string.Equals(u.Role, Roles.Admin))
+            .Where(u => string.Equals(u.Role, Roles.Employee))
             .ToListAsync(ct);
 
         foreach (var u in users)
@@ -399,7 +410,7 @@ public class OfflineNotifierService : BackgroundService
         CancellationToken ct)
     {
         var users = await db.Users
-            .Where(u => !string.Equals(u.Role, Roles.Admin))
+            .Where(u => string.Equals(u.Role, Roles.Employee))
             .ToListAsync(ct);
 
         foreach (var u in users)
@@ -675,21 +686,20 @@ public class OfflineNotifierService : BackgroundService
         User u,
         Attendance att,
         int elapsedMinutes,
-        int requiredMinutes)
+        int requiredMinutes,
+        ScheduleEntry? schedule)
     {
-        var checkInLocal = UserClock.Format(u, att.CheckIn, "yyyy-MM-dd HH:mm");
         var tzLabel = UserClock.Label(u);
-        var elapsedH = elapsedMinutes / 60;
-        var elapsedM = elapsedMinutes % 60;
-        var requiredH = requiredMinutes / 60;
+        var startLabel = schedule?.StartTime?.ToString("HH:mm") ?? "--:--";
+        var endLabel = schedule?.EndTime?.ToString("HH:mm") ?? "--:--";
 
         var subject = $"[Attendance] Reminder - {u.FullName}, please clock out";
         var body =
             $"Hi {u.FullName},\r\n\r\n" +
-            $"You checked in at {checkInLocal} {tzLabel} and have already rendered {elapsedH:D2}:{elapsedM:D2} (target {requiredH}h). " +
-            "This is a friendly reminder to clock out so your timesheet is captured correctly.\r\n\r\n" +
-            "If you need to keep working, you can ignore this message.\r\n\r\n" +
-            "This is an automated notification.\r\n";
+            "This is a friendly reminder to clock out so your timesheet is captured correctly.\r\n" +
+            $"Your shift is {startLabel} - {endLabel} {tzLabel}.\r\n\r\n" +
+            "If you need to keep working, you can ignore this automated notification.\r\n" +
+            "Thank you.\r\n";
 
         return (subject, body);
     }

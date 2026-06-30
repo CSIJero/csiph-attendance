@@ -1513,6 +1513,11 @@ form.was-validated select:invalid {
     color: #111111;
     border-color: #9ca3af;
 }
+.subtabs .subtab-closed-active .subtab-badge,
+.subtabs .subtab-closed-active:hover .subtab-badge {
+    background: #9ca3af;
+    color: #111111;
+}
 .subtab-badge {
     display: inline-block;
     min-width: 18px;

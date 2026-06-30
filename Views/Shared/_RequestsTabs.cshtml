@@ -9,6 +9,7 @@
         @await Html.PartialAsync("_RequestsTabs", ("leaves", pendingEdit, pendingLeave, pendingShift, pendingQuota))
         @await Html.PartialAsync("_RequestsTabs", ("shifts", pendingEdit, pendingLeave, pendingShift, pendingQuota))
         @await Html.PartialAsync("_RequestsTabs", ("quota",  pendingEdit, pendingLeave, pendingShift, pendingQuota))
+        @await Html.PartialAsync("_RequestsTabs", ("addtime", pendingEdit, pendingLeave, pendingShift, pendingQuota))
 *@
 @model (string Active, int PendingEdit, int PendingLeave, int PendingShift, int PendingQuota)
 @{
@@ -50,5 +51,10 @@
         {
             <span class="subtab-badge" title="@Model.PendingQuota pending">@Model.PendingQuota</span>
         }
+    </a>
+    <a class="@Cls("addtime")"
+       asp-controller="Attendance"
+       asp-action="RequestMissingEntry">
+        <span>Add time entry</span>
     </a>
 </nav>
