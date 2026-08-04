@@ -30,7 +30,7 @@ public class QuotaResetController : AppController
     [Authorize(Policy = "AdminOnly")]
     public async Task<IActionResult> Index()
     {
-        var visibleIds = await (await GetVisibleUsersAsync())
+        var visibleIds = await (await GetVisibleUsersAsync(includeAdmins: IsPureAdmin))
             .Select(u => u.Id)
             .ToListAsync();
 

@@ -75,7 +75,7 @@ public class LeaveController : AppController
         {
             // Restrict the admin / PM queue to users they're allowed to see
             // (admins: everyone; PMs: their own Business Unit).
-            var visibleIds = await (await GetVisibleUsersAsync())
+            var visibleIds = await (await GetVisibleUsersAsync(includeAdmins: IsPureAdmin))
                 .Select(u => u.Id)
                 .ToListAsync();
 

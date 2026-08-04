@@ -1443,7 +1443,9 @@ public class AttendanceController : AppController
     [Authorize(Policy = "AdminOnly")]
     public async Task<IActionResult> EditRequests()
     {
-        var visible = await GetVisibleUsersAsync();
+        // Pure admins review every request, including requests submitted by
+        // admin accounts. PM/PgM reviewers retain their normal user scope.
+        var visible = await GetVisibleUsersAsync(includeAdmins: IsPureAdmin);
         var visibleIds = await visible.Select(u => u.Id).ToListAsync();
 
         var pending = await Db.AttendanceEditRequests

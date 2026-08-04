@@ -1141,7 +1141,9 @@ public class ScheduleController : AppController
         if (me is null) return Challenge();
         if (!IsAdmin) return Forbid();
 
-        var visibleIds = await (await GetVisibleUsersAsync()).Select(u => u.Id).ToListAsync();
+        var visibleIds = await (await GetVisibleUsersAsync(includeAdmins: IsPureAdmin))
+            .Select(u => u.Id)
+            .ToListAsync();
 
         var pending = await Db.ScheduleAmendments
             .Include(a => a.User)
