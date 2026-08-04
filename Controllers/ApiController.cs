@@ -3,6 +3,7 @@ using AttendanceMonitoring.Models;
 using AttendanceMonitoring.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using System.Globalization;
@@ -33,13 +34,14 @@ public class ApiController : ControllerBase
 
     public class HeartbeatRequest
     {
-        // Optional client-reported presence: "online" | "away" | "offline".
-        // Missing / unknown values default to "online" so old clients keep
-        // working (they had no concept of an idle state).
+        // Client-reported presence: "online" | "away" | "offline".
+        // "away" is accepted for legacy clients but collapses to "online".
         public string? State { get; set; }
     }
 
     [HttpPost("heartbeat")]
+    [EnableRateLimiting("Heartbeat")]
+    [RequestSizeLimit(1024)]
     public async Task<IActionResult> Heartbeat([FromBody] HeartbeatRequest? body = null)
     {
         var raw = User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
@@ -48,12 +50,14 @@ public class ApiController : ControllerBase
         var u = await _db.Users.FirstOrDefaultAsync(x => x.Id == id);
         if (u is null) return Unauthorized();
 
+        if (!TryNormalizeHeartbeatState(body?.State, out var clientState))
+            return BadRequest(new { error = "State must be online, away, or offline." });
+
         u.LastSeen = DateTime.UtcNow;
 
         // Lunch wins over any client-reported state until it expires. The
         // client-side toggle is one-way (start/end) so the heartbeat label
         // shouldn't accidentally flip the state mid-break.
-        var clientState = NormalizeState(body?.State, fallback: "online");
         if (u.PresenceState == "lunch" && u.IsLunchActive())
         {
             // Stay on lunch — ignore the client's "online/away" ticks.
@@ -155,6 +159,23 @@ public class ApiController : ControllerBase
             "offline" => "offline",
             _         => fallback,
         };
+    }
+
+    private static bool TryNormalizeHeartbeatState(string? raw, out string state)
+    {
+        state = (raw ?? string.Empty).Trim().ToLowerInvariant();
+        switch (state)
+        {
+            case "online":
+            case "offline":
+                return true;
+            case "away":
+                state = "online";
+                return true;
+            default:
+                state = string.Empty;
+                return false;
+        }
     }
 
     [HttpPost("lunch/start")]

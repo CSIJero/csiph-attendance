@@ -766,6 +766,11 @@ public class AttendanceController : AppController
         // input is optional — if one is supplied we still sanitise and store it,
         // but a missing photo is no longer an error.
         var safePhoto = SanitizePhoto(photo);
+        if (!string.IsNullOrWhiteSpace(photo) && safePhoto is null)
+        {
+            TempData.Flash("The selfie image is invalid or too large.", "danger");
+            return RedirectToAction("Index", "Dashboard");
+        }
 
         // Find the most recent OPEN attendance row regardless of WorkDate.
         // Users who forget to check out at the end of the day still need to
@@ -972,13 +977,40 @@ public class AttendanceController : AppController
     private static string? SanitizePhoto(string? raw)
     {
         if (string.IsNullOrWhiteSpace(raw)) return null;
-        // Cap at ~4 MB of base64 (well above the ~40 KB the client actually posts).
-        const int MaxLength = 4 * 1024 * 1024;
-        if (raw.Length > MaxLength) return null;
-        if (!raw.StartsWith("data:image/", StringComparison.OrdinalIgnoreCase)) return null;
+        if (raw.Length > 4 * 1024 * 1024) return null;
+
         var commaIdx = raw.IndexOf(',');
         if (commaIdx <= 0) return null;
-        return raw;
+
+        var mediaType = raw[..commaIdx].Trim().ToLowerInvariant();
+        byte[] bytes;
+        try
+        {
+            bytes = Convert.FromBase64String(raw[(commaIdx + 1)..]);
+        }
+        catch (FormatException)
+        {
+            return null;
+        }
+
+        if (bytes.Length == 0 || bytes.Length > 3 * 1024 * 1024) return null;
+
+        var signatureMatches = mediaType switch
+        {
+            "data:image/jpeg;base64" => bytes.Length >= 3
+                && bytes[0] == 0xFF && bytes[1] == 0xD8 && bytes[2] == 0xFF,
+            "data:image/png;base64" => bytes.Length >= 8
+                && bytes.AsSpan(0, 8).SequenceEqual(
+                    new byte[] { 0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A }),
+            "data:image/webp;base64" => bytes.Length >= 12
+                && bytes.AsSpan(0, 4).SequenceEqual("RIFF"u8)
+                && bytes.AsSpan(8, 4).SequenceEqual("WEBP"u8),
+            _ => false,
+        };
+
+        return signatureMatches
+            ? $"{mediaType},{Convert.ToBase64String(bytes)}"
+            : null;
     }
 
     /// <summary>

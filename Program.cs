@@ -4,7 +4,10 @@ using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.HttpOverrides;
+using Microsoft.AspNetCore.RateLimiting;
+using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using System.Threading.RateLimiting;
 
 // One-shot CLI mode: copy a local SQLite attendance.db into a remote Postgres
 // (Render free tier). Invoked with `dotnet run -- migrate-sqlite --sqlite ...
@@ -47,7 +50,14 @@ builder.Services.AddDbContext<AppDbContext>(options =>
     }
     else
     {
-        options.UseSqlite(raw);
+        var sqliteConnectionString = new SqliteConnectionStringBuilder(raw)
+        {
+            DefaultTimeout = 30,
+            Pooling = false,
+        }.ToString();
+        options.UseSqlite(
+            sqliteConnectionString,
+            sqlite => sqlite.CommandTimeout(30));
     }
 });
 
@@ -70,6 +80,28 @@ builder.Services.AddAuthentication(CookieAuthenticationDefaults.AuthenticationSc
         options.AccessDeniedPath = "/Home/Forbidden";
         options.ExpireTimeSpan = TimeSpan.FromHours(sessionLifetimeHours);
         options.SlidingExpiration = true;
+        options.Events.OnRedirectToLogin = context =>
+        {
+            if (context.Request.Path.StartsWithSegments("/api"))
+            {
+                context.Response.StatusCode = StatusCodes.Status401Unauthorized;
+                return Task.CompletedTask;
+            }
+
+            context.Response.Redirect(context.RedirectUri);
+            return Task.CompletedTask;
+        };
+        options.Events.OnRedirectToAccessDenied = context =>
+        {
+            if (context.Request.Path.StartsWithSegments("/api"))
+            {
+                context.Response.StatusCode = StatusCodes.Status403Forbidden;
+                return Task.CompletedTask;
+            }
+
+            context.Response.Redirect(context.RedirectUri);
+            return Task.CompletedTask;
+        };
     });
 
 // Persist the data-protection key ring in the application DB. Render's
@@ -119,6 +151,29 @@ builder.Services.AddAuthorization(options =>
         AttendanceMonitoring.Models.Roles.Admin,
         AttendanceMonitoring.Models.Roles.ProgramManager,
         AttendanceMonitoring.Models.Roles.Pm));
+});
+
+builder.Services.AddRateLimiter(options =>
+{
+    options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
+    options.AddPolicy("Heartbeat", context =>
+    {
+        var userId = context.User.FindFirst(
+            System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
+        var partitionKey = userId
+            ?? context.Connection.RemoteIpAddress?.ToString()
+            ?? "unknown";
+
+        return RateLimitPartition.GetFixedWindowLimiter(
+            partitionKey,
+            _ => new FixedWindowRateLimiterOptions
+            {
+                PermitLimit = 10,
+                Window = TimeSpan.FromSeconds(15),
+                QueueLimit = 0,
+                AutoReplenishment = true,
+            });
+    });
 });
 
 // HttpContextAccessor so views can resolve the current user without ceremony.
@@ -183,20 +238,32 @@ if (!app.Environment.IsDevelopment())
 // strict CSP would break. The headers below are universally safe.
 app.Use(async (ctx, next) =>
 {
-    var headers = ctx.Response.Headers;
-    headers["X-Content-Type-Options"] = "nosniff";
-    headers["Referrer-Policy"] = "strict-origin-when-cross-origin";
-    if (!headers.ContainsKey("X-Frame-Options"))
+    try
     {
-        headers["X-Frame-Options"] = "SAMEORIGIN";
+        var headers = ctx.Response.Headers;
+        headers["X-Content-Type-Options"] = "nosniff";
+        headers["Referrer-Policy"] = "strict-origin-when-cross-origin";
+        if (!headers.ContainsKey("X-Frame-Options"))
+        {
+            headers["X-Frame-Options"] = "SAMEORIGIN";
+        }
+        await next();
     }
-    await next();
+    catch (BadHttpRequestException exception)
+        when (exception.StatusCode == StatusCodes.Status413PayloadTooLarge
+              && ctx.Request.Path.StartsWithSegments("/api"))
+    {
+        ctx.Response.Clear();
+        ctx.Response.StatusCode = StatusCodes.Status413PayloadTooLarge;
+        await ctx.Response.WriteAsJsonAsync(new { error = "Request body is too large." });
+    }
 });
 
 app.UseStaticFiles();
 app.UseRouting();
 
 app.UseAuthentication();
+app.UseRateLimiter();
 app.UseAuthorization();
 
 // Lightweight request logger so we can SEE in Render logs whether a
@@ -234,7 +301,9 @@ app.UseAuthorization();
 // change-password form until they pick a new one.
 app.UseMiddleware<AttendanceMonitoring.Services.ForcePasswordChangeMiddleware>();
 
-app.UseStatusCodePagesWithReExecute("/Home/Status/{0}");
+app.UseWhen(
+    context => !context.Request.Path.StartsWithSegments("/api"),
+    branch => branch.UseStatusCodePagesWithReExecute("/Home/Status/{0}"));
 
 app.MapControllerRoute(
     name: "default",
@@ -248,6 +317,10 @@ using (var scope = app.Services.CreateScope())
     var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
     var config = scope.ServiceProvider.GetRequiredService<IConfiguration>();
     await DbInitializer.InitializeAsync(db);
+    if (db.Database.IsSqlite())
+    {
+        await db.Database.ExecuteSqlRawAsync("PRAGMA journal_mode=WAL;");
+    }
     await RuntimeConfig.LoadFromDbAsync(db, config);
 }
 

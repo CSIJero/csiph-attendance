@@ -423,11 +423,20 @@
                 if (host) tipParts.push(`Host: ${host}`);
                 const tip = tipParts.join(" \u2022 ");
                 const topLine = loc || host || "-";
-                unit.innerHTML =
-                    `<span class="unit-cell"${tip ? ` title="${tip}"` : ""}>` +
-                        `<span class="unit-host">${topLine}</span>` +
-                        `<span class="unit-ip muted">${ip || "-"}</span>` +
-                    `</span>`;
+                const wrapper = document.createElement("span");
+                wrapper.className = "unit-cell";
+                if (tip) wrapper.title = tip;
+
+                const hostEl = document.createElement("span");
+                hostEl.className = "unit-host";
+                hostEl.textContent = topLine;
+
+                const ipEl = document.createElement("span");
+                ipEl.className = "unit-ip muted";
+                ipEl.textContent = ip || "-";
+
+                wrapper.append(hostEl, ipEl);
+                unit.replaceChildren(wrapper);
             } else {
                 unit.innerHTML = dash;
             }
@@ -1325,6 +1334,41 @@
             exportLink.href = `/attendance/export.xlsx?${buildQuery().toString()}`;
         }
 
+        function appendTextCell(row, value) {
+            const cell = document.createElement("td");
+            cell.textContent = value;
+            row.appendChild(cell);
+            return cell;
+        }
+
+        function createBadge(text, className) {
+            const badge = document.createElement("span");
+            badge.className = `badge ${className}`;
+            badge.textContent = text;
+            return badge;
+        }
+
+        function createSelfieNode(source, label, showEmpty) {
+            const validSource = typeof source === "string"
+                && /^data:image\/(?:jpeg|png|webp);base64,[A-Za-z0-9+/=\r\n]+$/.test(source);
+            if (validSource) {
+                const image = document.createElement("img");
+                image.src = source;
+                image.className = "selfie-thumb";
+                image.alt = label;
+                image.title = label;
+                image.dataset.selfieZoom = "";
+                return image;
+            }
+            if (!showEmpty) return null;
+
+            const empty = document.createElement("span");
+            empty.className = "selfie-thumb-empty";
+            empty.title = `No ${label.toLowerCase()}`;
+            empty.textContent = "—";
+            return empty;
+        }
+
         function renderRecords(payload) {
             const recs = payload.records || [];
             tbody.innerHTML = "";
@@ -1334,35 +1378,49 @@
                 for (const r of recs) {
                     const tr = document.createElement("tr");
                     const ci = r.check_in ? fmtHHMM(r.check_in) : "—";
-                    const co = r.check_out ? fmtHHMM(r.check_out) : '<span class="badge badge-active">Open</span>';
                     const dur = r.check_out ? fmtDurationMinutes(r.duration_minutes) : "—";
-                    const status = r.status === "Open"
-                        ? '<span class="badge badge-active">Open</span>'
-                        : '<span class="badge badge-done">Closed</span>';
-                    const inThumb = r.check_in_photo
-                        ? `<img src="${r.check_in_photo}" class="selfie-thumb" alt="Check-in selfie" title="Check-in selfie" data-selfie-zoom />`
-                        : '<span class="selfie-thumb-empty" title="No check-in photo">—</span>';
-                    const outThumb = r.check_out_photo
-                        ? `<img src="${r.check_out_photo}" class="selfie-thumb" alt="Check-out selfie" title="Check-out selfie" data-selfie-zoom />`
-                        : (r.check_out
-                            ? '<span class="selfie-thumb-empty" title="No check-out photo">—</span>'
-                            : "");
-                    // Admin / PM-only inline edit shortcut. The server route
-                    // (/attendance/{id}/edit) is itself AdminOnly so anyone
-                    // reaching this modal can use it; the link is just a
-                    // discoverability aid so reviewers don't have to leave
-                    // the dashboard to fix a clock-in / clock-out timestamp.
-                    const editLink = r.id != null
-                        ? `<a class="btn btn-ghost btn-sm" href="/attendance/${r.id}/edit" title="Edit this clock-in / clock-out">Edit</a>`
-                        : "";
-                    tr.innerHTML = `
-                        <td>${r.work_date}</td>
-                        <td>${ci}</td>
-                        <td>${co}</td>
-                        <td>${dur}</td>
-                        <td>${status}</td>
-                        <td><div style="display:flex;gap:6px;align-items:center;">${inThumb}${outThumb}</div></td>
-                        <td>${editLink}</td>`;
+
+                    appendTextCell(tr, r.work_date || "—");
+                    appendTextCell(tr, ci);
+
+                    const checkOutCell = document.createElement("td");
+                    if (r.check_out) checkOutCell.textContent = fmtHHMM(r.check_out);
+                    else checkOutCell.appendChild(createBadge("Open", "badge-active"));
+                    tr.appendChild(checkOutCell);
+
+                    appendTextCell(tr, dur);
+
+                    const statusCell = document.createElement("td");
+                    const isOpen = r.status === "Open";
+                    statusCell.appendChild(createBadge(
+                        isOpen ? "Open" : "Closed",
+                        isOpen ? "badge-active" : "badge-done"));
+                    tr.appendChild(statusCell);
+
+                    const photoCell = document.createElement("td");
+                    const photoWrap = document.createElement("div");
+                    photoWrap.style.display = "flex";
+                    photoWrap.style.gap = "6px";
+                    photoWrap.style.alignItems = "center";
+                    const inThumb = createSelfieNode(
+                        r.check_in_photo, "Check-in selfie", true);
+                    const outThumb = createSelfieNode(
+                        r.check_out_photo, "Check-out selfie", !!r.check_out);
+                    if (inThumb) photoWrap.appendChild(inThumb);
+                    if (outThumb) photoWrap.appendChild(outThumb);
+                    photoCell.appendChild(photoWrap);
+                    tr.appendChild(photoCell);
+
+                    const actionCell = document.createElement("td");
+                    if (r.id != null) {
+                        const editLink = document.createElement("a");
+                        editLink.className = "btn btn-ghost btn-sm";
+                        editLink.href = `/attendance/${encodeURIComponent(String(r.id))}/edit`;
+                        editLink.title = "Edit this clock-in / clock-out";
+                        editLink.textContent = "Edit";
+                        actionCell.appendChild(editLink);
+                    }
+                    tr.appendChild(actionCell);
                     tbody.appendChild(tr);
                 }
             }

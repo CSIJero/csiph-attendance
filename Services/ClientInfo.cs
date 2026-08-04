@@ -307,17 +307,9 @@ public static class ClientInfo
 
     private static string? GetClientIp(HttpContext ctx)
     {
-        // Dev Tunnels and reverse proxies inject the original client address
-        // here. Take the left-most entry; that's the original requester.
-        var xff = ctx.Request.Headers["X-Forwarded-For"].ToString();
-        if (!string.IsNullOrWhiteSpace(xff))
-        {
-            var first = xff.Split(',', StringSplitOptions.RemoveEmptyEntries
-                                     | StringSplitOptions.TrimEntries)
-                           .FirstOrDefault();
-            if (!string.IsNullOrEmpty(first)) return Normalize(first);
-        }
-
+        // Forwarded-header middleware promotes configured proxy headers to
+        // RemoteIpAddress. Never read X-Forwarded-For directly: clients can
+        // forge its left-most value.
         var addr = ctx.Connection.RemoteIpAddress;
         return addr is null ? null : Normalize(addr);
     }
