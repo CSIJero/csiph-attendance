@@ -57,6 +57,13 @@ public class User
     /// </summary>
     public bool Approved { get; set; } = false;
 
+    /// <summary>
+    /// True when the user account is active. Set to false when an employee
+    /// is no longer working at the company, but preserves all historical
+    /// attendance and schedule data. Deactivated users cannot sign in.
+    /// </summary>
+    public bool IsActive { get; set; } = true;
+
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 
     public DateTime? LastSeen { get; set; }

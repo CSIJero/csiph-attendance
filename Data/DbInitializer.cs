@@ -86,6 +86,10 @@ public static class DbInitializer
         // Run this early so legacy Postgres schemas are patched first.
         await EnsureUserFaceColumnsAsync(db);
 
+        // Deactivation support: add IsActive column to allow marking users
+        // as inactive without deleting their historical data.
+        await EnsureIsActiveColumnAsync(db);
+
         // One-time cleanup: drop the bundled demo (jdoe) account if it's
         // still hanging around from a pre-launch seed. Idempotent — no-op
         // once the row is gone.
@@ -1726,6 +1730,33 @@ public static class DbInitializer
     }
 
     /// <summary>Adds <c>FaceHash</c> and <c>FaceEnrolledAt</c> to <c>users</c>.</summary>
+    private static async Task EnsureIsActiveColumnAsync(AppDbContext db)
+    {
+        if (db.Database.IsNpgsql())
+        {
+            await db.Database.ExecuteSqlRawAsync(
+                "ALTER TABLE users ADD COLUMN IF NOT EXISTS \"IsActive\" BOOLEAN NOT NULL DEFAULT TRUE;");
+            await db.Database.ExecuteSqlRawAsync(
+                "CREATE INDEX IF NOT EXISTS \"IX_users_IsActive\" ON users (\"IsActive\");");
+            return;
+        }
+
+        if (!db.Database.IsSqlite()) return;
+
+        var existing = await GetColumnsAsync(db, "users");
+        if (!existing.Contains("IsActive"))
+        {
+            await db.Database.ExecuteSqlRawAsync(
+                "ALTER TABLE users ADD COLUMN IsActive INTEGER NOT NULL DEFAULT 1;");
+        }
+        try
+        {
+            await db.Database.ExecuteSqlRawAsync(
+                "CREATE INDEX IF NOT EXISTS IX_users_IsActive ON users(IsActive);");
+        }
+        catch { /* old SQLite without IF NOT EXISTS — ignore */ }
+    }
+
     private static async Task EnsureUserFaceColumnsAsync(AppDbContext db)
     {
         if (db.Database.IsNpgsql())

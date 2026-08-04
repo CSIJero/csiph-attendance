@@ -1530,6 +1530,15 @@ form.was-validated select:invalid {
     line-height: 18px;
     text-align: center;
 }
+/* Make the Closed tab badge always gray */
+.subtabs a:nth-child(3) .subtab-badge {
+    background: #9ca3af;
+    color: #111111;
+}
+.subtab-badge-closed {
+    background: #9ca3af;
+    color: #111111;
+}
 
 /* =====================================================================
    App shell — Adminty-style sidebar + slim topbar.

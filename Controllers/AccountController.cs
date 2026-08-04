@@ -53,6 +53,16 @@ public class AccountController : AppController
             return View(vm);
         }
 
+        // Reject sign-in if the account has been deactivated.
+        if (!user.IsActive)
+        {
+            TempData.Flash(
+                "Your account has been deactivated. Please contact your administrator.",
+                "warning");
+            ViewData["ReturnUrl"] = returnUrl;
+            return View(vm);
+        }
+
         var claims = new List<Claim>
         {
             new(ClaimTypes.NameIdentifier, user.Id.ToString()),

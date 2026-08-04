@@ -186,7 +186,7 @@ public class AttendanceController : AppController
             return RedirectToAction(nameof(RequestMissingEntry));
         }
         var safeProof = SanitizePhoto(proof_photo);
-        if (safeProof is null)
+        if (!IsAdmin && safeProof is null)
         {
             TempData.Flash("Image proof is required for time adjustment requests.", "danger");
             return RedirectToAction(nameof(RequestMissingEntry));

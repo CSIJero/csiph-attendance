@@ -89,8 +89,18 @@
         </label>
 
         <label>
-            <span>Image proof <small class="muted">— required</small></span>
-            <input type="file" id="proof_picker" accept="image/*" required />
+            <span>
+                Image proof
+                @if (Model.ViewerIsAdmin)
+                {
+                    <small class="muted">— optional for admin / PM</small>
+                }
+                else
+                {
+                    <small class="muted">— required</small>
+                }
+            </span>
+            <input type="file" id="proof_picker" accept="image/*" required="@(!Model.ViewerIsAdmin)" />
             <small class="muted">Upload a screenshot or photo as evidence for this time adjustment.</small>
         </label>
 

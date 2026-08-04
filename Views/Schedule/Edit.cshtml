@@ -105,6 +105,26 @@
                        asp-route-week="@w">W@(w)</a>
                 }
             </div>
+
+            @if (Model.ViewerIsAdmin)
+            {
+                <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-left:auto;">
+                          <a class="btn"
+                              href="/schedule/schedule-template-v2.xlsx?month=@monthIso">Schedule Template (Updated)</a>
+
+                    <form method="post"
+                          enctype="multipart/form-data"
+                          asp-controller="Schedule"
+                          asp-action="BulkUpload"
+                          asp-route-user_id="@(Model.ViewerIsAdmin ? (int?)Model.Target.Id : null)"
+                          asp-route-month="@monthIso"
+                          asp-route-week="@(Model.WeekFilter > 0 ? (int?)Model.WeekFilter : null)"
+                          style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+                        <input type="file" name="file" accept=".csv,.xlsx,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" required />
+                        <button type="submit" class="btn btn-primary">Upload bulk schedule</button>
+                    </form>
+                </div>
+            }
         </div>
     </section>
 }

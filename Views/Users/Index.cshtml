@@ -127,20 +127,21 @@
                     <th>Email</th>
                     <th>Business Unit</th>
                     <th>Assigned to</th>
+                    <th>Status</th>
                     <th style="width:150px; white-space:nowrap;" data-no-sort></th>
                 </tr>
             </thead>
             <tbody>
                 @if (Model.Users.Count == 0)
                 {
-                    <tr><td colspan="7" class="muted">No users yet.</td></tr>
+                    <tr><td colspan="8" class="muted">No users yet.</td></tr>
                 }
                 else
                 {
                     foreach (var u in Model.Users)
                     {
                         var isSelf = meId != null && meId == u.Id.ToString();
-                        <tr>
+                        <tr @(u.IsActive ? "" : "style=\"opacity: 0.6;\"")>
                             <td>
                                 @if (string.IsNullOrWhiteSpace(u.EmployeeId))
                                 {
@@ -176,6 +177,16 @@
                                 }
                             </td>
                             <td>
+                                @if (u.IsActive)
+                                {
+                                    <span class="badge badge-success">Active</span>
+                                }
+                                else
+                                {
+                                    <span class="badge badge-warn">Inactive</span>
+                                }
+                            </td>
+                            <td>
                                 <div class="icon-actions">
                                     <a asp-controller="Users" asp-action="Edit"
                                        asp-route-id="@u.Id"
@@ -204,6 +215,42 @@
                                             </svg>
                                         </button>
                                     </form>
+                                    @if (u.IsActive)
+                                    {
+                                        @if (!isSelf)
+                                        {
+                                            <form method="post" asp-controller="Users" asp-action="Deactivate"
+                                                  asp-route-id="@u.Id" class="inline"
+                                                  onsubmit="return confirm('Deactivate @u.FullName? Their historical records will be preserved, but they won\'t be able to sign in.');">
+                                                @Html.AntiForgeryToken()
+                                                <button type="submit" class="icon-btn icon-btn-warn"
+                                                        title="Deactivate user" aria-label="Deactivate @u.FullName">
+                                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                                         stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
+                                                         aria-hidden="true">
+                                                        <circle cx="12" cy="12" r="10" />
+                                                        <line x1="4.93" y1="4.93" x2="19.07" y2="19.07" />
+                                                    </svg>
+                                                </button>
+                                            </form>
+                                        }
+                                    }
+                                    else
+                                    {
+                                        <form method="post" asp-controller="Users" asp-action="Reactivate"
+                                              asp-route-id="@u.Id" class="inline"
+                                              onsubmit="return confirm('Reactivate @u.FullName? They\'ll be able to sign in again.');">
+                                            @Html.AntiForgeryToken()
+                                            <button type="submit" class="icon-btn icon-btn-success"
+                                                    title="Reactivate user" aria-label="Reactivate @u.FullName">
+                                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                                     stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
+                                                     aria-hidden="true">
+                                                    <polyline points="20 6 9 17 4 12" />
+                                                </svg>
+                                            </button>
+                                        </form>
+                                    }
                                     @if (!isSelf)
                                     {
                                         <form method="post" asp-controller="Users" asp-action="Delete"

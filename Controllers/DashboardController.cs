@@ -111,12 +111,27 @@ public class DashboardController : AppController
             .ToListAsync();
 
         var userIds = users.Select(u => u.Id).ToList();
-        var todays = await Db.Attendances
+        var todaysRows = await Db.Attendances
             .Where(a => a.WorkDate == today && userIds.Contains(a.UserId))
-            .ToDictionaryAsync(a => a.UserId);
-        var todaysSchedule = await Db.ScheduleEntries
+            .OrderByDescending(a => a.CheckIn)
+            .ToListAsync();
+        var todays = todaysRows
+            // Data can have accidental duplicates per user/day; pick the most
+            // actionable row (open row first, else latest check-in).
+            .GroupBy(a => a.UserId)
+            .ToDictionary(
+                g => g.Key,
+                g => g.OrderByDescending(x => x.IsOpen)
+                      .ThenByDescending(x => x.CheckIn)
+                      .First());
+
+        var todaysScheduleRows = await Db.ScheduleEntries
             .Where(s => s.WorkDate == today && userIds.Contains(s.UserId))
-            .ToDictionaryAsync(s => s.UserId);
+            .OrderByDescending(s => s.Id)
+            .ToListAsync();
+        var todaysSchedule = todaysScheduleRows
+            .GroupBy(s => s.UserId)
+            .ToDictionary(g => g.Key, g => g.First());
         var todayHolidayRows = await Db.Holidays
             .Where(h => h.Date == today)
             .ToListAsync();
@@ -204,13 +219,17 @@ public class DashboardController : AppController
 
             var dbRows = await Db.ScheduleEntries
                 .Where(s => s.UserId == me.Id && s.WorkDate >= weekStart && s.WorkDate <= weekEnd)
-                .ToDictionaryAsync(s => s.WorkDate);
+                .OrderByDescending(s => s.Id)
+                .ToListAsync();
+            var weekRowsByDate = dbRows
+                .GroupBy(s => s.WorkDate)
+                .ToDictionary(g => g.Key, g => g.First());
             var weekHolidays = await HolidayHelper.RangeForAsync(Db, me, weekStart, weekEnd);
             var schedule = Enumerable.Range(0, 7)
                 .Select(i =>
                 {
                     var d = weekStart.AddDays(i);
-                    return dbRows.TryGetValue(d, out var row)
+                    return weekRowsByDate.TryGetValue(d, out var row)
                         ? row
                         : ScheduleEntry.CsiDefaultFor(me.Id, d);
                 })
@@ -280,13 +299,17 @@ public class DashboardController : AppController
 
         var dbRows = await Db.ScheduleEntries
             .Where(s => s.UserId == me.Id && s.WorkDate >= weekStart && s.WorkDate <= weekEnd)
-            .ToDictionaryAsync(s => s.WorkDate);
+            .OrderByDescending(s => s.Id)
+            .ToListAsync();
+        var weekRowsByDate = dbRows
+            .GroupBy(s => s.WorkDate)
+            .ToDictionary(g => g.Key, g => g.First());
         var weekHolidays = await HolidayHelper.RangeForAsync(Db, me, weekStart, weekEnd);
         var schedule = Enumerable.Range(0, 7)
             .Select(i =>
             {
                 var d = weekStart.AddDays(i);
-                return dbRows.TryGetValue(d, out var row)
+                return weekRowsByDate.TryGetValue(d, out var row)
                     ? row
                     : ScheduleEntry.CsiDefaultFor(me.Id, d);
             })

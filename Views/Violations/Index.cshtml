@@ -49,7 +49,7 @@
         <span>Closed</span>
         @if (Model.ClosedCount > 0)
         {
-            <span class="subtab-badge" title="@Model.ClosedCount closed items">@Model.ClosedCount</span>
+            <span class="subtab-badge subtab-badge-closed" title="@Model.ClosedCount closed items">@Model.ClosedCount</span>
         }
     </a>
     <a class="@TabCls("all")" asp-controller="Violations" asp-action="Index" asp-route-filter="all">

@@ -1,9 +1,11 @@
 using System.Globalization;
+using System.Text;
 using AttendanceMonitoring.Data;
 using AttendanceMonitoring.Helpers;
 using AttendanceMonitoring.Models;
 using AttendanceMonitoring.Services;
 using AttendanceMonitoring.ViewModels;
+using ClosedXML.Excel;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -14,7 +16,520 @@ namespace AttendanceMonitoring.Controllers;
 [Route("schedule")]
 public class ScheduleController : AppController
 {
+    private sealed record BulkScheduleRow(
+        int UserId,
+        DateOnly WorkDate,
+        bool IsWorking,
+        TimeOnly? StartTime,
+        TimeOnly? EndTime,
+        string WorkType,
+        string? Note);
+
     public ScheduleController(AppDbContext db) : base(db) { }
+
+    [HttpGet("bulk-template.csv")]
+    public async Task<IActionResult> BulkTemplate([FromQuery(Name = "month")] string? monthRaw)
+    {
+        if (!IsAdmin) return Forbid();
+
+        var monthStart = ParseMonth(monthRaw) ?? FirstOfMonth(PhTime.Today);
+        var daysInMonth = DateTime.DaysInMonth(monthStart.Year, monthStart.Month);
+        var monthEnd = monthStart.AddDays(daysInMonth - 1);
+        var me = await GetCurrentUserAsync();
+        var visibleUsers = await (await GetVisibleUsersAsync())
+            .Where(u => u.Role != Roles.Admin && u.EmployeeId != null && u.EmployeeId != "")
+            .OrderBy(u => me != null && u.Id == me.Id ? 0 : 1)
+            .ThenBy(u => u.FullName)
+            .ToListAsync();
+
+        var userIds = visibleUsers.Select(u => u.Id).ToList();
+        var existing = userIds.Count == 0
+            ? new List<ScheduleEntry>()
+            : await Db.ScheduleEntries
+                .Where(s => userIds.Contains(s.UserId)
+                            && s.WorkDate >= monthStart
+                            && s.WorkDate <= monthEnd)
+                .ToListAsync();
+        var existingByKey = existing
+            .GroupBy(s => (s.UserId, s.WorkDate))
+            .ToDictionary(g => g.Key, g => g.OrderByDescending(x => x.UpdatedAt).First());
+
+        var sb = new StringBuilder();
+        sb.AppendLine("EmployeeId,FullName,Role,WorkDate,Day,IsWorking,StartTime,EndTime,WorkType,Notes");
+        if (visibleUsers.Count == 0)
+        {
+            sb.AppendLine("E000001,Sample Employee,employee," + monthStart.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture) + ",Mon,true,09:00,18:00,Onsite,Regular shift");
+            sb.AppendLine("E000001,Sample Employee,employee," + monthStart.AddDays(1).ToString("yyyy-MM-dd", CultureInfo.InvariantCulture) + ",Tue,false,,,Dayoff,Rest day");
+        }
+        else
+        {
+            foreach (var u in visibleUsers)
+            {
+                for (var i = 0; i < daysInMonth; i++)
+                {
+                    var workDate = monthStart.AddDays(i);
+                    existingByKey.TryGetValue((u.Id, workDate), out var entry);
+
+                    var isWeekend = workDate.DayOfWeek is DayOfWeek.Saturday or DayOfWeek.Sunday;
+                    var workType = entry?.WorkType
+                                   ?? (isWeekend ? "Dayoff" : "Onsite");
+                    var isWorking = entry?.IsWorking
+                                    ?? !ScheduleEntry.IsNonWorkingType(workType);
+                    var start = isWorking
+                        ? (entry?.StartTime?.ToString("HH:mm", CultureInfo.InvariantCulture) ?? "09:00")
+                        : string.Empty;
+                    var end = isWorking
+                        ? (entry?.EndTime?.ToString("HH:mm", CultureInfo.InvariantCulture) ?? "18:00")
+                        : string.Empty;
+                    var note = entry?.Note
+                               ?? (isWorking ? "Regular shift" : "Rest day");
+
+                    sb.AppendLine(
+                        string.Join(",",
+                            CsvField(u.EmployeeId ?? string.Empty),
+                            CsvField(u.FullName),
+                            CsvField(u.Role),
+                            workDate.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
+                            workDate.ToString("ddd", CultureInfo.InvariantCulture),
+                            isWorking ? "true" : "false",
+                            start,
+                            end,
+                            workType,
+                            CsvField(note)));
+                }
+            }
+        }
+
+        var csv = sb.ToString();
+        var bytes = Encoding.UTF8.GetPreamble().Concat(Encoding.UTF8.GetBytes(csv)).ToArray();
+        return File(bytes, "text/csv", $"schedule_bulk_template_{monthStart:yyyy_MM}.csv");
+    }
+
+    [HttpGet("schedule-template.xlsx")]
+    [HttpGet("schedule-template-v2.xlsx")]
+    public async Task<IActionResult> ScheduleTemplate([FromQuery(Name = "month")] string? monthRaw)
+    {
+        if (!IsAdmin) return Forbid();
+
+        var monthStart = ParseMonth(monthRaw) ?? FirstOfMonth(PhTime.Today);
+        var daysInMonth = DateTime.DaysInMonth(monthStart.Year, monthStart.Month);
+        var monthEnd = monthStart.AddDays(daysInMonth - 1);
+        var me = await GetCurrentUserAsync();
+        var visibleUsers = await (await GetVisibleUsersAsync())
+            .Where(u => u.Role != Roles.Admin && u.EmployeeId != null && u.EmployeeId != "")
+            .OrderBy(u => me != null && u.Id == me.Id ? 0 : 1)
+            .ThenBy(u => u.FullName)
+            .ToListAsync();
+
+        var userIds = visibleUsers.Select(u => u.Id).ToList();
+        var existing = userIds.Count == 0
+            ? new List<ScheduleEntry>()
+            : await Db.ScheduleEntries
+                .Where(s => userIds.Contains(s.UserId)
+                            && s.WorkDate >= monthStart
+                            && s.WorkDate <= monthEnd)
+                .ToListAsync();
+        var existingByKey = existing
+            .GroupBy(s => (s.UserId, s.WorkDate))
+            .ToDictionary(g => g.Key, g => g.OrderByDescending(x => x.UpdatedAt).First());
+
+        using var wb = new XLWorkbook();
+
+        var calendar = wb.Worksheets.Add("Schedule Template");
+        var totalCols = 2 + daysInMonth;
+        calendar.Cell(1, 1).Value = $"Schedule Template - {monthStart:MMMM yyyy}";
+        calendar.Range(1, 1, 1, totalCols).Merge();
+        calendar.Range(1, 1, 1, totalCols).Style.Font.SetBold();
+        calendar.Range(1, 1, 1, totalCols).Style.Font.FontSize = 16;
+        calendar.Range(1, 1, 1, totalCols).Style.Fill.BackgroundColor = XLColor.FromHtml("#123B5D");
+        calendar.Range(1, 1, 1, totalCols).Style.Font.FontColor = XLColor.White;
+        calendar.Range(1, 1, 1, totalCols).Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Center;
+        calendar.Range(1, 1, 1, totalCols).Style.Alignment.Vertical = XLAlignmentVerticalValues.Center;
+
+        calendar.Cell(2, 1).Value = "Employee ID";
+        calendar.Cell(2, 2).Value = "Employee Name";
+
+        for (var i = 0; i < daysInMonth; i++)
+        {
+            var d = monthStart.AddDays(i);
+            var col = 3 + i;
+            calendar.Cell(2, col).Value = d.Day;
+            calendar.Cell(3, col).Value = d.ToString("ddd", CultureInfo.InvariantCulture);
+            calendar.Cell(2, col).Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Center;
+            calendar.Cell(3, col).Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Center;
+
+            if (d.DayOfWeek is DayOfWeek.Saturday or DayOfWeek.Sunday)
+            {
+                calendar.Range(2, col, Math.Max(4, visibleUsers.Count + 3), col)
+                    .Style.Fill.BackgroundColor = XLColor.FromHtml("#F2F2F2");
+            }
+        }
+
+        calendar.Range(2, 1, 3, totalCols).Style.Font.SetBold();
+        calendar.Range(2, 1, 3, totalCols).Style.Fill.BackgroundColor = XLColor.FromHtml("#E8F1F8");
+        calendar.Range(2, 1, 3, totalCols).Style.Alignment.Vertical = XLAlignmentVerticalValues.Center;
+
+        calendar.Column(1).Width = 14;
+        calendar.Column(2).Width = 24;
+        for (var col = 3; col <= totalCols; col++)
+        {
+            calendar.Column(col).Width = 12;
+        }
+
+        var row = 4;
+        if (visibleUsers.Count == 0)
+        {
+            calendar.Cell(row, 1).Value = "E000001";
+            calendar.Cell(row, 2).Value = "Sample Employee";
+        }
+        else
+        {
+            foreach (var u in visibleUsers)
+            {
+                calendar.Cell(row, 1).Value = u.EmployeeId;
+                calendar.Cell(row, 2).Value = u.FullName;
+
+                for (var i = 0; i < daysInMonth; i++)
+                {
+                    var workDate = monthStart.AddDays(i);
+                    var col = 3 + i;
+                    existingByKey.TryGetValue((u.Id, workDate), out var entry);
+
+                    var isWeekend = workDate.DayOfWeek is DayOfWeek.Saturday or DayOfWeek.Sunday;
+                    var workType = entry?.WorkType ?? (isWeekend ? "Dayoff" : "Onsite");
+                    var isWorking = entry?.IsWorking ?? !ScheduleEntry.IsNonWorkingType(workType);
+                    var start = isWorking
+                        ? (entry?.StartTime?.ToString("HH:mm", CultureInfo.InvariantCulture) ?? "09:00")
+                        : string.Empty;
+                    var end = isWorking
+                        ? (entry?.EndTime?.ToString("HH:mm", CultureInfo.InvariantCulture) ?? "18:00")
+                        : string.Empty;
+
+                    var text = isWorking ? $"{start}-{end}\n{workType}" : workType;
+                    var cell = calendar.Cell(row, col);
+                    cell.Value = text;
+                    cell.Style.Alignment.WrapText = true;
+                    cell.Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Center;
+                    cell.Style.Alignment.Vertical = XLAlignmentVerticalValues.Center;
+
+                    if (isWorking)
+                    {
+                        cell.Style.Fill.BackgroundColor = XLColor.FromHtml("#E7F7EE");
+                    }
+                    else
+                    {
+                        cell.Style.Fill.BackgroundColor = XLColor.FromHtml("#FFF4E6");
+                    }
+                }
+
+                row++;
+            }
+        }
+
+        calendar.SheetView.FreezeRows(3);
+        calendar.SheetView.FreezeColumns(2);
+        calendar.Range(2, 1, Math.Max(4, row - 1), totalCols).Style.Border.OutsideBorder = XLBorderStyleValues.Thin;
+        calendar.Range(2, 1, Math.Max(4, row - 1), totalCols).Style.Border.InsideBorder = XLBorderStyleValues.Thin;
+        calendar.Rows().AdjustToContents();
+
+        using var stream = new MemoryStream();
+        wb.SaveAs(stream);
+
+        Response.Headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0";
+        Response.Headers["Pragma"] = "no-cache";
+        Response.Headers["Expires"] = "0";
+
+        return File(stream.ToArray(),
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            $"Schedule_Template_{monthStart:yyyy_MM}_v2.xlsx");
+    }
+
+    [HttpPost("bulk-upload")]
+    [ValidateAntiForgeryToken]
+    public async Task<IActionResult> BulkUpload(
+        IFormFile? file,
+        [FromQuery(Name = "user_id")] int? userId,
+        [FromQuery(Name = "month")] string? monthRaw,
+        [FromQuery(Name = "week")] int? weekRaw)
+    {
+        if (!IsAdmin) return Forbid();
+        if (file is null || file.Length == 0)
+        {
+            TempData.Flash("Please choose a CSV file to upload.", "danger");
+            return RedirectToAction(nameof(Edit), new { user_id = userId, month = monthRaw, week = weekRaw });
+        }
+
+        var visibleUsers = await (await GetVisibleUsersAsync())
+            .Where(u => u.Role != Roles.Admin && u.EmployeeId != null && u.EmployeeId != "")
+            .ToListAsync();
+        var visibleByEmployeeId = visibleUsers
+            .GroupBy(u => (u.EmployeeId ?? string.Empty).Trim(), StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(g => g.Key, g => g.First(), StringComparer.OrdinalIgnoreCase);
+
+        var monthStart = ParseMonth(monthRaw) ?? FirstOfMonth(PhTime.Today);
+        var daysInMonth = DateTime.DaysInMonth(monthStart.Year, monthStart.Month);
+        var errors = new List<string>();
+        var parsed = new Dictionary<(int UserId, DateOnly WorkDate), BulkScheduleRow>();
+        var ext = (Path.GetExtension(file.FileName) ?? string.Empty).ToLowerInvariant();
+        if (ext == ".xlsx")
+        {
+            using var stream = file.OpenReadStream();
+            using var wb = new XLWorkbook(stream);
+            var ws = wb.Worksheets.FirstOrDefault(w =>
+                         w.Name.Equals("Schedule Template", StringComparison.OrdinalIgnoreCase))
+                     ?? wb.Worksheet(1);
+
+            var lastRow = ws.LastRowUsed()?.RowNumber() ?? 0;
+            var lastCol = ws.LastColumnUsed()?.ColumnNumber() ?? 0;
+            if (lastRow < 4 || lastCol < 3)
+            {
+                TempData.Flash("Uploaded Excel template has no schedule rows.", "danger");
+                return RedirectToAction(nameof(Edit), new { user_id = userId, month = monthRaw, week = weekRaw });
+            }
+
+            var dayByCol = new Dictionary<int, DateOnly>();
+            for (var col = 3; col <= lastCol; col++)
+            {
+                var dayRaw = ws.Cell(2, col).GetValue<string>().Trim();
+                if (!int.TryParse(dayRaw, out var day) || day < 1 || day > daysInMonth) continue;
+                dayByCol[col] = new DateOnly(monthStart.Year, monthStart.Month, day);
+            }
+
+            if (dayByCol.Count == 0)
+            {
+                TempData.Flash("Uploaded Excel template is missing calendar day headers.", "danger");
+                return RedirectToAction(nameof(Edit), new { user_id = userId, month = monthRaw, week = weekRaw });
+            }
+
+            for (var row = 4; row <= lastRow; row++)
+            {
+                var empId = ws.Cell(row, 1).GetValue<string>().Trim();
+                if (string.IsNullOrWhiteSpace(empId)) continue;
+
+                if (!visibleByEmployeeId.TryGetValue(empId, out var user))
+                {
+                    errors.Add($"Row {row}: EmployeeId '{empId}' is unknown or out of your scope.");
+                    if (errors.Count >= 25) break;
+                    continue;
+                }
+
+                foreach (var (col, workDate) in dayByCol)
+                {
+                    var rawCell = ws.Cell(row, col).GetValue<string>().Trim();
+                    if (string.IsNullOrWhiteSpace(rawCell)) continue;
+
+                    if (!TryParseCalendarCell(rawCell,
+                            out var isWorking,
+                            out var start,
+                            out var end,
+                            out var workType,
+                            out var note))
+                    {
+                        errors.Add($"Row {row}, day {workDate.Day}: invalid cell format '{rawCell}'. Use '09:00-18:00\\nOnsite' or 'Dayoff'.");
+                        if (errors.Count >= 25) break;
+                        continue;
+                    }
+
+                    if (isWorking && (start is null || end is null))
+                    {
+                        errors.Add($"Row {row}, day {workDate.Day}: StartTime and EndTime are required for working shifts.");
+                        if (errors.Count >= 25) break;
+                        continue;
+                    }
+
+                    if (isWorking && !IsRoundTheClockScheduleUser(user)
+                        && start is not null && end is not null && end.Value <= start.Value)
+                    {
+                        errors.Add($"Row {row}, day {workDate.Day}: EndTime must be after StartTime for {user.FullName}.");
+                        if (errors.Count >= 25) break;
+                        continue;
+                    }
+
+                    parsed[(user.Id, workDate)] = new BulkScheduleRow(
+                        user.Id,
+                        workDate,
+                        isWorking,
+                        isWorking ? start : null,
+                        isWorking ? end : null,
+                        workType,
+                        note);
+                }
+
+                if (errors.Count >= 25)
+                {
+                    continue;
+                }
+            }
+        }
+        else
+        {
+            using var stream = file.OpenReadStream();
+            using var reader = new StreamReader(stream);
+            var headerLine = await reader.ReadLineAsync();
+            if (string.IsNullOrWhiteSpace(headerLine))
+            {
+                TempData.Flash("Uploaded CSV is empty.", "danger");
+                return RedirectToAction(nameof(Edit), new { user_id = userId, month = monthRaw, week = weekRaw });
+            }
+
+            var headerCells = ParseCsvLine(headerLine);
+            var index = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+            for (var i = 0; i < headerCells.Count; i++)
+            {
+                var key = (headerCells[i] ?? string.Empty).Trim();
+                if (key.Length == 0) continue;
+                index[key] = i;
+            }
+
+            if (!index.ContainsKey("EmployeeId") || !index.ContainsKey("WorkDate"))
+            {
+                TempData.Flash("CSV must include EmployeeId and WorkDate columns.", "danger");
+                return RedirectToAction(nameof(Edit), new { user_id = userId, month = monthRaw, week = weekRaw });
+            }
+
+            var lineNumber = 1;
+            while (!reader.EndOfStream)
+            {
+                var rawLine = await reader.ReadLineAsync();
+                lineNumber++;
+                if (string.IsNullOrWhiteSpace(rawLine)) continue;
+
+                var cells = ParseCsvLine(rawLine);
+
+                string Value(string key)
+                {
+                    if (!index.TryGetValue(key, out var idx)) return string.Empty;
+                    return idx < cells.Count ? (cells[idx] ?? string.Empty).Trim() : string.Empty;
+                }
+
+                var empId = Value("EmployeeId");
+                var workDateRaw = Value("WorkDate");
+                var isWorkingRaw = Value("IsWorking");
+                var startRaw = Value("StartTime");
+                var endRaw = Value("EndTime");
+                var workTypeRaw = Value("WorkType");
+                var noteRaw = Value("Notes");
+
+                if (!visibleByEmployeeId.TryGetValue(empId, out var user))
+                {
+                    errors.Add($"Line {lineNumber}: EmployeeId '{empId}' is unknown or out of your scope.");
+                    if (errors.Count >= 25) break;
+                    continue;
+                }
+
+                if (!DateOnly.TryParseExact(workDateRaw, "yyyy-MM-dd", CultureInfo.InvariantCulture,
+                        DateTimeStyles.None, out var workDate))
+                {
+                    errors.Add($"Line {lineNumber}: WorkDate '{workDateRaw}' must be yyyy-MM-dd.");
+                    if (errors.Count >= 25) break;
+                    continue;
+                }
+
+                var workType = workTypeRaw switch
+                {
+                    _ when workTypeRaw.Equals("Onsite", StringComparison.OrdinalIgnoreCase) => "Onsite",
+                    _ when workTypeRaw.Equals("Offsite", StringComparison.OrdinalIgnoreCase) => "Offsite",
+                    _ when workTypeRaw.Equals("Dayoff", StringComparison.OrdinalIgnoreCase) => "Dayoff",
+                    _ when workTypeRaw.Equals("Onleave", StringComparison.OrdinalIgnoreCase) => "Onleave",
+                    _ when workTypeRaw.Equals("Holiday", StringComparison.OrdinalIgnoreCase) => "Holiday",
+                    _ => string.Empty,
+                };
+
+                var hasBool = TryParseBool(isWorkingRaw, out var boolWorking);
+                var isWorking = !string.IsNullOrEmpty(workType)
+                    ? !ScheduleEntry.IsNonWorkingType(workType)
+                    : (hasBool ? boolWorking : true);
+                if (string.IsNullOrEmpty(workType))
+                {
+                    workType = isWorking ? "Onsite" : "Dayoff";
+                }
+
+                var start = ParseTime(startRaw);
+                var end = ParseTime(endRaw);
+
+                if (isWorking && (start is null || end is null))
+                {
+                    errors.Add($"Line {lineNumber}: StartTime and EndTime are required when IsWorking is true.");
+                    if (errors.Count >= 25) break;
+                    continue;
+                }
+
+                if (isWorking && !IsRoundTheClockScheduleUser(user)
+                    && start is not null && end is not null && end.Value <= start.Value)
+                {
+                    errors.Add($"Line {lineNumber}: EndTime must be after StartTime for {user.FullName}.");
+                    if (errors.Count >= 25) break;
+                    continue;
+                }
+
+                var note = string.IsNullOrWhiteSpace(noteRaw) ? null : noteRaw.Trim();
+                if (note is { Length: > 200 }) note = note[..200];
+
+                parsed[(user.Id, workDate)] = new BulkScheduleRow(
+                    user.Id,
+                    workDate,
+                    isWorking,
+                    isWorking ? start : null,
+                    isWorking ? end : null,
+                    workType,
+                    note);
+            }
+        }
+
+        if (errors.Count > 0)
+        {
+            TempData.Flash(
+                "Bulk upload failed: " + string.Join(" ", errors),
+                "danger");
+            return RedirectToAction(nameof(Edit), new { user_id = userId, month = monthRaw, week = weekRaw });
+        }
+
+        if (parsed.Count == 0)
+        {
+            TempData.Flash("No valid schedule rows found in uploaded file.", "warning");
+            return RedirectToAction(nameof(Edit), new { user_id = userId, month = monthRaw, week = weekRaw });
+        }
+
+        var userIds = parsed.Keys.Select(k => k.UserId).Distinct().ToList();
+        var dates = parsed.Keys.Select(k => k.WorkDate).Distinct().ToList();
+        var existing = await Db.ScheduleEntries
+            .Where(s => userIds.Contains(s.UserId) && dates.Contains(s.WorkDate))
+            .ToListAsync();
+        var existingByKey = existing.ToDictionary(s => (s.UserId, s.WorkDate));
+
+        var inserted = 0;
+        var updated = 0;
+        foreach (var row in parsed.Values)
+        {
+            if (!existingByKey.TryGetValue((row.UserId, row.WorkDate), out var entry))
+            {
+                entry = new ScheduleEntry
+                {
+                    UserId = row.UserId,
+                    WorkDate = row.WorkDate,
+                };
+                Db.ScheduleEntries.Add(entry);
+                inserted++;
+            }
+            else
+            {
+                updated++;
+            }
+
+            entry.IsWorking = row.IsWorking;
+            entry.StartTime = row.IsWorking ? row.StartTime : null;
+            entry.EndTime = row.IsWorking ? row.EndTime : null;
+            entry.WorkType = row.WorkType;
+            if (row.Note is not null) entry.Note = row.Note;
+            entry.UpdatedAt = DateTime.UtcNow;
+        }
+
+        await Db.SaveChangesAsync();
+        TempData.Flash(
+            $"Bulk schedule upload applied. Rows: {parsed.Count}, inserted: {inserted}, updated: {updated}.",
+            "success");
+        return RedirectToAction(nameof(Edit), new { user_id = userId, month = monthRaw, week = weekRaw });
+    }
 
     // ------------------------------------------------------------------
     // Default landing redirects to the per-user editor. The legacy
@@ -345,6 +860,142 @@ public class ScheduleController : AppController
         if (TimeOnly.TryParse(raw.Trim(), CultureInfo.InvariantCulture, out t))
             return t;
         return null;
+    }
+
+    private static bool TryParseBool(string? raw, out bool value)
+    {
+        var s = (raw ?? string.Empty).Trim();
+        if (bool.TryParse(s, out value)) return true;
+        if (s.Equals("1", StringComparison.OrdinalIgnoreCase)
+            || s.Equals("yes", StringComparison.OrdinalIgnoreCase)
+            || s.Equals("y", StringComparison.OrdinalIgnoreCase))
+        {
+            value = true;
+            return true;
+        }
+        if (s.Equals("0", StringComparison.OrdinalIgnoreCase)
+            || s.Equals("no", StringComparison.OrdinalIgnoreCase)
+            || s.Equals("n", StringComparison.OrdinalIgnoreCase))
+        {
+            value = false;
+            return true;
+        }
+        value = false;
+        return false;
+    }
+
+    private static bool TryParseCalendarCell(
+        string raw,
+        out bool isWorking,
+        out TimeOnly? start,
+        out TimeOnly? end,
+        out string workType,
+        out string? note)
+    {
+        isWorking = false;
+        start = null;
+        end = null;
+        workType = "Dayoff";
+        note = null;
+
+        var lines = (raw ?? string.Empty)
+            .Replace("\r", string.Empty)
+            .Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        if (lines.Length == 0) return false;
+
+        var first = lines[0];
+        if (first.Contains('-', StringComparison.Ordinal))
+        {
+            var pair = first.Split('-', 2, StringSplitOptions.TrimEntries);
+            if (pair.Length != 2) return false;
+            start = ParseTime(pair[0]);
+            end = ParseTime(pair[1]);
+            if (start is null || end is null) return false;
+
+            isWorking = true;
+            workType = lines.Length > 1
+                ? (NormalizeWorkType(lines[1]) ?? "Onsite")
+                : "Onsite";
+            if (ScheduleEntry.IsNonWorkingType(workType)) workType = "Onsite";
+            if (lines.Length > 2)
+            {
+                note = string.Join(" ", lines.Skip(2)).Trim();
+                if (note.Length == 0) note = null;
+                if (note is { Length: > 200 }) note = note[..200];
+            }
+            return true;
+        }
+
+        var normalized = NormalizeWorkType(first);
+        if (normalized is null) return false;
+        workType = normalized;
+        isWorking = !ScheduleEntry.IsNonWorkingType(workType);
+        if (isWorking)
+        {
+            start = ParseTime("09:00");
+            end = ParseTime("18:00");
+        }
+
+        if (lines.Length > 1)
+        {
+            note = string.Join(" ", lines.Skip(1)).Trim();
+            if (note.Length == 0) note = null;
+            if (note is { Length: > 200 }) note = note[..200];
+        }
+        return true;
+    }
+
+    private static string? NormalizeWorkType(string? raw)
+    {
+        var s = (raw ?? string.Empty).Trim();
+        if (s.Length == 0) return null;
+        if (s.Equals("Onsite", StringComparison.OrdinalIgnoreCase)) return "Onsite";
+        if (s.Equals("Offsite", StringComparison.OrdinalIgnoreCase)) return "Offsite";
+        if (s.Equals("Dayoff", StringComparison.OrdinalIgnoreCase)) return "Dayoff";
+        if (s.Equals("Onleave", StringComparison.OrdinalIgnoreCase)) return "Onleave";
+        if (s.Equals("Holiday", StringComparison.OrdinalIgnoreCase)) return "Holiday";
+        return null;
+    }
+
+    private static List<string> ParseCsvLine(string line)
+    {
+        var cells = new List<string>();
+        var sb = new StringBuilder();
+        var inQuotes = false;
+        for (var i = 0; i < line.Length; i++)
+        {
+            var c = line[i];
+            if (c == '"')
+            {
+                if (inQuotes && i + 1 < line.Length && line[i + 1] == '"')
+                {
+                    sb.Append('"');
+                    i++;
+                }
+                else
+                {
+                    inQuotes = !inQuotes;
+                }
+                continue;
+            }
+            if (c == ',' && !inQuotes)
+            {
+                cells.Add(sb.ToString());
+                sb.Clear();
+                continue;
+            }
+            sb.Append(c);
+        }
+        cells.Add(sb.ToString());
+        return cells;
+    }
+
+    private static string CsvField(string value)
+    {
+        if (value.Contains('"')) value = value.Replace("\"", "\"\"");
+        return value.Contains(',') || value.Contains('\n') || value.Contains('\r') || value.Contains('"')
+            ? $"\"{value}\""
+            : value;
     }
 
     // -------------------------------------------------------------------

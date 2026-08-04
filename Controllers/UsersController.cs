@@ -301,6 +301,96 @@ public class UsersController : AppController
         return RedirectToAction(nameof(Index));
     }
 
+    /// <summary>
+    /// Deactivates an approved account, marking the user as no longer
+    /// employed. Preserves all historical attendance and schedule data.
+    /// Deactivated users cannot sign in. Guards: cannot deactivate the
+    /// last active admin/PM (lockout protection).
+    /// </summary>
+    [HttpPost]
+    [ValidateAntiForgeryToken]
+    public async Task<IActionResult> Deactivate(int id)
+    {
+        if (!await CanViewUserAsync(id))
+        {
+            TempData.Flash("You don't have access to that user.", "danger");
+            return RedirectToAction(nameof(Index));
+        }
+
+        var me = await GetCurrentUserAsync();
+        if (me is not null && me.Id == id)
+        {
+            TempData.Flash("You can't deactivate your own account.", "danger");
+            return RedirectToAction(nameof(Index));
+        }
+
+        var user = await Db.Users.FirstOrDefaultAsync(u => u.Id == id);
+        if (user is null)
+        {
+            TempData.Flash("That user no longer exists.", "danger");
+            return RedirectToAction(nameof(Index));
+        }
+
+        if (!user.IsActive)
+        {
+            TempData.Flash($"{user.FullName} is already deactivated.", "info");
+            return RedirectToAction(nameof(Index));
+        }
+
+        // Don't let the team deactivate its way into a lockout — keep at
+        // least one approved active admin / PM around at all times.
+        if (Roles.IsAdminRole(user.Role) && user.Approved)
+        {
+            var remainingAdmins = await Db.Users.CountAsync(u =>
+                u.Id != id && u.Approved && u.IsActive
+                && (u.Role == Roles.Admin || u.Role == Roles.Pm));
+            if (remainingAdmins == 0)
+            {
+                TempData.Flash(
+                    "Can't deactivate the last active admin / PM — promote another user first.",
+                    "danger");
+                return RedirectToAction(nameof(Index));
+            }
+        }
+
+        user.IsActive = false;
+        await Db.SaveChangesAsync();
+        TempData.Flash($"Deactivated {user.FullName}. Their account is preserved for historical records.", "success");
+        return RedirectToAction(nameof(Index));
+    }
+
+    /// <summary>
+    /// Reactivates a deactivated account, allowing the user to sign in again.
+    /// </summary>
+    [HttpPost]
+    [ValidateAntiForgeryToken]
+    public async Task<IActionResult> Reactivate(int id)
+    {
+        if (!await CanViewUserAsync(id))
+        {
+            TempData.Flash("You don't have access to that user.", "danger");
+            return RedirectToAction(nameof(Index));
+        }
+
+        var user = await Db.Users.FirstOrDefaultAsync(u => u.Id == id);
+        if (user is null)
+        {
+            TempData.Flash("That user no longer exists.", "danger");
+            return RedirectToAction(nameof(Index));
+        }
+
+        if (user.IsActive)
+        {
+            TempData.Flash($"{user.FullName} is already active.", "info");
+            return RedirectToAction(nameof(Index));
+        }
+
+        user.IsActive = true;
+        await Db.SaveChangesAsync();
+        TempData.Flash($"Reactivated {user.FullName}. They can now sign in again.", "success");
+        return RedirectToAction(nameof(Index));
+    }
+
     [HttpGet]
     public async Task<IActionResult> Edit(int id)
     {
