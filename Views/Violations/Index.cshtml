@@ -110,10 +110,19 @@
                             onclick="return confirm('Mark all selected reminders as Closed?');">
                         Close
                     </button>
+                    <button type="submit" name="action" value="override"
+                            class="btn btn-secondary btn-sm"
+                            onclick="return confirm('Override and close all selected reminders?');">
+                        Override
+                    </button>
                 }
                 else if (Model.Filter == "closed")
                 {
-                    <span class="muted">Closed items are read-only.</span>
+                    <button type="submit" name="action" value="reopen"
+                            class="btn btn-primary btn-sm"
+                            onclick="return confirm('Reopen all selected reminders and return them to Pending?');">
+                        Reopen
+                    </button>
                 }
                 else if (Model.Filter == "pending")
                 {
@@ -126,6 +135,21 @@
                             class="btn btn-secondary btn-sm"
                             onclick="return confirm('Mark all selected reminders as Closed?');">
                         Close
+                    </button>
+                    <button type="submit" name="action" value="warning"
+                            class="btn btn-warn btn-sm"
+                            onclick="return confirm('Close all selected reminders as Warning?');">
+                        Warning
+                    </button>
+                    <button type="submit" name="action" value="override"
+                            class="btn btn-secondary btn-sm"
+                            onclick="return confirm('Override and close all selected reminders?');">
+                        Override
+                    </button>
+                    <button type="submit" name="action" value="clear"
+                            class="btn btn-danger btn-sm"
+                            onclick="return confirm('Permanently clear all selected false-alarm reminders?');">
+                        Clear
                     </button>
                 }
                 else
@@ -150,6 +174,11 @@
                             onclick="return confirm('Override all selected reminders (PM right to override)?');">
                         Override
                     </button>
+                    <button type="submit" name="action" value="clear"
+                            class="btn btn-danger btn-sm"
+                            onclick="return confirm('Permanently clear all selected false-alarm reminders?');">
+                        Clear
+                    </button>
                 }
                 <button type="button" class="btn btn-ghost btn-sm"
                         id="violations-bulk-deselect">
@@ -157,7 +186,7 @@
                 </button>
             </div>
             <div class="table-wrap">
-                <table class="data-table sortable" id="violations-table">
+                <table class="data-table sortable violations-table" id="violations-table">
                     <thead>
                         <tr>
                             <th data-no-sort style="width:34px;">
@@ -169,7 +198,7 @@
                             <th data-sort-type="num">Offline for</th>
                             <th>Email status</th>
                             <th data-no-sort>Thread</th>
-                            <th data-no-sort style="width:340px;">Action</th>
+                            <th data-no-sort>Action</th>
                         </tr>
                     </thead>
                     @foreach (var group in Model.Rows
@@ -179,7 +208,8 @@
                         var groupCount = group.Count();
                         var groupLabel = group.Key.ToString("dddd, MMM d, yyyy");
                         var groupId = "g-" + group.Key.ToString("yyyyMMdd");
-                        <tbody data-group-id="@groupId">
+                        <tbody data-group-id="@groupId"
+                               data-group-sort="@group.Key.ToString("yyyy-MM-dd")">
                             <tr class="group-header">
                                 <td data-no-sort>
                                     <input type="checkbox"
@@ -273,7 +303,13 @@
                                                 }
                                                 else if (Model.Filter == "closed")
                                                 {
-                                                    <span class="muted">Approved - no action needed</span>
+                                                    <button type="submit"
+                                                            form="row-form-@n.Id"
+                                                            name="action" value="reopen"
+                                                            class="btn btn-primary btn-sm"
+                                                            onclick="return confirm('Reopen this reminder and return it to Pending?');">
+                                                        Reopen
+                                                    </button>
                                                 }
                                                 else if (Model.Filter == "pending")
                                                 {
@@ -289,6 +325,26 @@
                                                             class="btn btn-secondary btn-sm">
                                                         Close
                                                     </button>
+                                                    <button type="submit"
+                                                            form="row-form-@n.Id"
+                                                            name="action" value="warning"
+                                                            class="btn btn-warn btn-sm">
+                                                        Warning
+                                                    </button>
+                                                    <button type="submit"
+                                                            form="row-form-@n.Id"
+                                                            name="action" value="override"
+                                                            class="btn btn-secondary btn-sm"
+                                                            onclick="return confirm('Override and close this reminder?');">
+                                                        Override
+                                                    </button>
+                                                    <button type="submit"
+                                                            form="row-form-@n.Id"
+                                                            name="action" value="clear"
+                                                            class="btn btn-danger btn-sm"
+                                                            onclick="return confirm('Permanently clear this false-alarm reminder?');">
+                                                        Clear
+                                                    </button>
                                                 }
                                                 else
                                                 {
@@ -300,6 +356,13 @@
                                                                 class="btn btn-secondary btn-sm"
                                                                 onclick="return confirm('Mark this reminder as Closed?');">
                                                             Close
+                                                        </button>
+                                                        <button type="submit"
+                                                                form="row-form-@n.Id"
+                                                                name="action" value="override"
+                                                                class="btn btn-secondary btn-sm"
+                                                                onclick="return confirm('Override and close this reminder?');">
+                                                            Override
                                                         </button>
                                                     }
                                                     else if (rowIsClosed)
@@ -320,6 +383,26 @@
                                                                 class="btn btn-secondary btn-sm">
                                                             Close
                                                         </button>
+                                                        <button type="submit"
+                                                                form="row-form-@n.Id"
+                                                                name="action" value="warning"
+                                                                class="btn btn-warn btn-sm">
+                                                            Warning
+                                                        </button>
+                                                        <button type="submit"
+                                                                form="row-form-@n.Id"
+                                                                name="action" value="override"
+                                                                class="btn btn-secondary btn-sm"
+                                                                onclick="return confirm('Override and close this reminder?');">
+                                                            Override
+                                                        </button>
+                                                        <button type="submit"
+                                                                form="row-form-@n.Id"
+                                                                name="action" value="clear"
+                                                                class="btn btn-danger btn-sm"
+                                                                onclick="return confirm('Permanently clear this false-alarm reminder?');">
+                                                            Clear
+                                                        </button>
                                                     }
                                                 }
                                             }
@@ -331,6 +414,13 @@
                                                         class="btn btn-secondary btn-sm"
                                                         onclick="return confirm('Mark this reminder as Closed?');">
                                                     Close
+                                                </button>
+                                                <button type="submit"
+                                                        form="row-form-@n.Id"
+                                                        name="action" value="override"
+                                                        class="btn btn-secondary btn-sm"
+                                                        onclick="return confirm('Override and close this reminder?');">
+                                                    Override
                                                 </button>
                                             }
                                         </div>

@@ -1540,6 +1540,39 @@ form.was-validated select:invalid {
     color: #111111;
 }
 
+.violations-table {
+    min-width: 760px;
+    font-size: 0.88rem;
+}
+.violations-table th,
+.violations-table td {
+    padding: 7px 8px;
+    vertical-align: top;
+}
+.violations-table .row-actions {
+    flex-wrap: wrap;
+    min-width: 0;
+}
+.violations-table .row-actions .note-input {
+    flex: 1 1 150px;
+    min-width: 140px !important;
+    max-width: 220px;
+}
+.violations-table .row-actions .btn {
+    white-space: nowrap;
+}
+
+@media (max-width: 720px) {
+    .violations-table {
+        min-width: 680px;
+        font-size: 0.8rem;
+    }
+    .violations-table th,
+    .violations-table td {
+        padding: 5px 6px;
+    }
+}
+
 /* =====================================================================
    App shell — Adminty-style sidebar + slim topbar.
    Inspired by https://demo.dashboardpack.com/adminty-html/

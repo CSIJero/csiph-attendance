@@ -112,12 +112,19 @@ public class ViolationsController : AppController
             "close" or "closed" => "Closed",
             "warning" => "Warning",
             "deduction" => "Deduction",
-            "override" or "overridden" or "dismiss" => "Overridden",
-            "clear" => "Closed",
-            "reset" or "delete" => "__DELETE__",
-            "" => null,
-            _ => null,
+            // Override dismisses the decision values and closes the false
+            // alarm without retaining a separate "Overridden" state.
+            "override" or "overridden" or "dismiss" => "Closed",
+            "reopen" or "reset" => null,
+            "clear" or "delete" => "__DELETE__",
+            _ => "__INVALID__",
         };
+
+        if (normalised == "__INVALID__")
+        {
+            TempData.Flash("Choose a valid reminder action.", "warning");
+            return RedirectToAction(nameof(Index), new { filter = filter ?? "pending" });
+        }
 
         if (normalised == "__DELETE__")
         {
@@ -130,7 +137,7 @@ public class ViolationsController : AppController
         row.ActionTaken = normalised;
         if (normalised is null)
         {
-            // Reset \u2014 clear the audit trail back to pending.
+            // Reopen: clear the decision trail and return to Pending.
             row.ActionByUserId = null;
             row.ActionAt = null;
             row.ActionNote = null;
@@ -141,7 +148,10 @@ public class ViolationsController : AppController
             row.ActionAt = DateTime.UtcNow;
             var trimmed = (note ?? string.Empty).Trim();
             if (trimmed.Length > 500) trimmed = trimmed[..500];
-            row.ActionNote = AppendThreadEntry(row.ActionNote, me.FullName, trimmed);
+            var isOverride = rawAction is "override" or "overridden" or "dismiss";
+            row.ActionNote = isOverride
+                ? null
+                : AppendThreadEntry(row.ActionNote, me.FullName, trimmed);
         }
 
         await Db.SaveChangesAsync();
@@ -205,12 +215,17 @@ public class ViolationsController : AppController
             "close" or "closed" => "Closed",
             "warning" => "Warning",
             "deduction" => "Deduction",
-            "override" or "overridden" or "dismiss" => "Overridden",
-            "clear" => "Closed",
-            "reset" or "delete" => "__DELETE__",
-            "" => null,
-            _ => null,
+            "override" or "overridden" or "dismiss" => "Closed",
+            "reopen" or "reset" => null,
+            "clear" or "delete" => "__DELETE__",
+            _ => "__INVALID__",
         };
+
+        if (normalised == "__INVALID__")
+        {
+            TempData.Flash("Choose a valid reminder action.", "warning");
+            return RedirectToAction(nameof(Index), new { filter = filter ?? "pending" });
+        }
 
         var rows = await Db.NotificationLogs
             .Where(n => idList.Contains(n.Id))
@@ -257,7 +272,10 @@ public class ViolationsController : AppController
                 {
                     row.ActionByUserId = me.Id;
                     row.ActionAt = DateTime.UtcNow;
-                    row.ActionNote = AppendThreadEntry(row.ActionNote, me.FullName, noteValue);
+                    var isOverride = rawAction is "override" or "overridden" or "dismiss";
+                    row.ActionNote = isOverride
+                        ? null
+                        : AppendThreadEntry(row.ActionNote, me.FullName, noteValue);
                     if (normalised == "Investigating") investigateRows.Add(row);
                 }
                 applied++;

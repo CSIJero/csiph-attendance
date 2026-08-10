@@ -1431,6 +1431,23 @@
             titleEl.textContent = u.full_name || currentUserName;
         }
 
+        function renderLoadError(message) {
+            tbody.innerHTML = "";
+            const row = document.createElement("tr");
+            const cell = document.createElement("td");
+            cell.colSpan = 7;
+            cell.className = "flash flash-danger";
+            cell.append(document.createTextNode(`${message} `));
+            const retry = document.createElement("button");
+            retry.type = "button";
+            retry.className = "btn btn-ghost btn-sm";
+            retry.dataset.attendanceRetry = "";
+            retry.textContent = "Retry";
+            cell.appendChild(retry);
+            row.appendChild(cell);
+            tbody.appendChild(row);
+        }
+
         async function loadRecords() {
             tbody.innerHTML = '<tr><td colspan="7" class="muted">Loading…</td></tr>';
             countEl.textContent = "";
@@ -1438,7 +1455,7 @@
                 const res = await fetch(`/api/attendance/${currentUserId}?${buildQuery().toString()}`,
                     { credentials: "same-origin" });
                 if (!res.ok) {
-                    tbody.innerHTML = `<tr><td colspan="7" class="flash flash-danger">Failed to load (${res.status})</td></tr>`;
+                    renderLoadError(`Failed to load (${res.status}).`);
                     return;
                 }
                 const data = await res.json();
@@ -1446,9 +1463,15 @@
                 refreshExportLink();
             } catch (err) {
                 console.warn("attendance load failed", err);
-                tbody.innerHTML = '<tr><td colspan="7" class="flash flash-danger">Network error.</td></tr>';
+                renderLoadError("Network error.");
             }
         }
+
+        tbody.addEventListener("click", (event) => {
+            if (event.target.closest("[data-attendance-retry]")) {
+                loadRecords();
+            }
+        });
 
         function openModal(userId, userName) {
             currentUserId = userId;

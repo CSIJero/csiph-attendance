@@ -125,6 +125,25 @@
             for (var d = 0; d < dataRows.length; d++) frag.appendChild(dataRows[d]);
             tbody.appendChild(frag);
         }
+
+        // Date-grouped tables use one tbody per calendar date. Sorting only
+        // the rows inside each tbody makes the Date header appear broken, so
+        // reorder the groups themselves when every group provides an ISO key.
+        if (forcedType === 'date' && tbodies.length > 1) {
+            var groups = Array.prototype.slice.call(tbodies);
+            var hasGroupKeys = groups.every(function (body) {
+                return body.dataset && body.dataset.groupSort;
+            });
+            if (hasGroupKeys) {
+                var mult = direction === 'desc' ? -1 : 1;
+                groups.sort(function (a, b) {
+                    var av = Date.parse(a.dataset.groupSort);
+                    var bv = Date.parse(b.dataset.groupSort);
+                    return (av - bv) * mult;
+                });
+                groups.forEach(function (body) { table.appendChild(body); });
+            }
+        }
     }
 
     function wireTable(table) {
