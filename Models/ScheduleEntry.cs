@@ -110,6 +110,22 @@ public class ScheduleEntry
     }
 
     /// <summary>
+    /// True when a local wall-clock timestamp falls inside this concrete
+    /// schedule row, including an overnight end on the following date.
+    /// </summary>
+    public bool CoversLocal(DateTime localDateTime)
+    {
+        if (!IsWorking || StartTime is null || EndTime is null) return false;
+
+        var start = WorkDate.ToDateTime(StartTime.Value);
+        var endDate = EndTime.Value <= StartTime.Value
+            ? WorkDate.AddDays(1)
+            : WorkDate;
+        var end = endDate.ToDateTime(EndTime.Value);
+        return localDateTime >= start && localDateTime <= end;
+    }
+
+    /// <summary>
     /// True when the provided work-type label is treated as a non-working
     /// day (no shift window): Dayoff, Onleave, or Holiday.
     /// </summary>

@@ -107,7 +107,9 @@ public class ScheduleController : AppController
 
     [HttpGet("schedule-template.xlsx")]
     [HttpGet("schedule-template-v2.xlsx")]
-    public async Task<IActionResult> ScheduleTemplate([FromQuery(Name = "month")] string? monthRaw)
+    public async Task<IActionResult> ScheduleTemplate(
+        [FromQuery(Name = "month")] string? monthRaw,
+        [FromQuery(Name = "user_id")] int? userId)
     {
         if (!IsAdmin) return Forbid();
 
@@ -115,11 +117,24 @@ public class ScheduleController : AppController
         var daysInMonth = DateTime.DaysInMonth(monthStart.Year, monthStart.Month);
         var monthEnd = monthStart.AddDays(daysInMonth - 1);
         var me = await GetCurrentUserAsync();
-        var visibleUsers = await (await GetVisibleUsersAsync())
-            .Where(u => u.Role != Roles.Admin && u.EmployeeId != null && u.EmployeeId != "")
+        var visibleUsersQuery = (await GetVisibleUsersAsync())
+            .Where(u => u.Role != Roles.Admin && u.EmployeeId != null && u.EmployeeId != "");
+
+        if (userId is int selectedUserId)
+        {
+            if (!await CanViewUserAsync(selectedUserId)) return Forbid();
+            visibleUsersQuery = visibleUsersQuery.Where(u => u.Id == selectedUserId);
+        }
+
+        var visibleUsers = await visibleUsersQuery
             .OrderBy(u => me != null && u.Id == me.Id ? 0 : 1)
             .ThenBy(u => u.FullName)
             .ToListAsync();
+
+        if (userId is not null && visibleUsers.Count == 0)
+        {
+            return BadRequest("The selected user must have an Employee ID before a schedule template can be downloaded.");
+        }
 
         var userIds = visibleUsers.Select(u => u.Id).ToList();
         var existing = userIds.Count == 0
@@ -239,9 +254,10 @@ public class ScheduleController : AppController
         Response.Headers["Pragma"] = "no-cache";
         Response.Headers["Expires"] = "0";
 
+        var scopeSuffix = userId is int selectedId ? $"_user_{selectedId}" : "_all_users";
         return File(stream.ToArray(),
             "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            $"Schedule_Template_{monthStart:yyyy_MM}_v2.xlsx");
+            $"Schedule_Template_{monthStart:yyyy_MM}{scopeSuffix}_v2.xlsx");
     }
 
     [HttpPost("bulk-upload")]
@@ -333,14 +349,6 @@ public class ScheduleController : AppController
                     if (isWorking && (start is null || end is null))
                     {
                         errors.Add($"Row {row}, day {workDate.Day}: StartTime and EndTime are required for working shifts.");
-                        if (errors.Count >= 25) break;
-                        continue;
-                    }
-
-                    if (isWorking && !IsRoundTheClockScheduleUser(user)
-                        && start is not null && end is not null && end.Value <= start.Value)
-                    {
-                        errors.Add($"Row {row}, day {workDate.Day}: EndTime must be after StartTime for {user.FullName}.");
                         if (errors.Count >= 25) break;
                         continue;
                     }
@@ -450,14 +458,6 @@ public class ScheduleController : AppController
                 if (isWorking && (start is null || end is null))
                 {
                     errors.Add($"Line {lineNumber}: StartTime and EndTime are required when IsWorking is true.");
-                    if (errors.Count >= 25) break;
-                    continue;
-                }
-
-                if (isWorking && !IsRoundTheClockScheduleUser(user)
-                    && start is not null && end is not null && end.Value <= start.Value)
-                {
-                    errors.Add($"Line {lineNumber}: EndTime must be after StartTime for {user.FullName}.");
                     if (errors.Count >= 25) break;
                     continue;
                 }
@@ -579,12 +579,9 @@ public class ScheduleController : AppController
         var isAdminTarget = string.Equals(target.Role, Roles.Admin,
             StringComparison.OrdinalIgnoreCase);
 
-        // Support users DO get a weekly grid \u2014 they just have free reign to
-        // pick any times (including cross-midnight like 16:00 \u2192 00:00 or
-        // 22:00 \u2192 06:00). The Save handler skips the end > start check for
-        // them; the model's Hours calculation already handles the wrap.
+        // Support users get the same per-date grid and may edit their own row.
+        // Cross-midnight times are valid for every scheduled employee.
         var isSupportTarget = target.IsSupport;
-        var isRoundTheClockTarget = IsRoundTheClockScheduleUser(target);
 
         // Anchor month: query param wins, else current PHT month.
         var monthStart = ParseMonth(monthRaw) ?? FirstOfMonth(PhTime.Today);
@@ -746,7 +743,6 @@ public class ScheduleController : AppController
         }
 
         var isSupportTarget = target.IsSupport;
-        var isRoundTheClockTarget = IsRoundTheClockScheduleUser(target);
 
         // Collect submitted dates from the form's date_* keys.
         var dates = new List<DateOnly>();
@@ -797,16 +793,6 @@ public class ScheduleController : AppController
             if (workType is not null)
             {
                 working = !ScheduleEntry.IsNonWorkingType(workType);
-            }
-
-            if (working && !isRoundTheClockTarget
-                && start is not null && end is not null && end.Value <= start.Value)
-            {
-                TempData.Flash(
-                    $"{date:ddd, MMM d}: end time must be after start time.",
-                    "danger");
-                return RedirectToAction(nameof(Edit),
-                    new { user_id = target.Id, month = monthRaw, week = weekRaw });
             }
 
             if (!existing.TryGetValue(date, out var entry))
@@ -1070,15 +1056,6 @@ public class ScheduleController : AppController
             TempData.Flash("Please pick both a start and end time for a working day.", "danger");
             return RedirectToAction(nameof(Edit), new { user_id = target.Id });
         }
-        // For regular users we still require end > start; Support, Program
-        // Managers, and Project Managers may save cross-midnight shifts.
-        if (working && !IsRoundTheClockScheduleUser(target)
-            && startT is not null && endT is not null && endT.Value <= startT.Value)
-        {
-            TempData.Flash("End time must be after start time.", "danger");
-            return RedirectToAction(nameof(Edit), new { user_id = target.Id });
-        }
-
         note = (note ?? string.Empty).Trim();
         if (note.Length > 200) note = note[..200];
 
@@ -1385,12 +1362,4 @@ public class ScheduleController : AppController
         return raw;
     }
 
-    /// <summary>
-    /// Users that follow 24/7-style schedule timing rules and can carry
-    /// cross-midnight shifts (end <= start).
-    /// </summary>
-    private static bool IsRoundTheClockScheduleUser(User user)
-        => user.IsSupport
-           || string.Equals(user.Role, Roles.ProgramManager, StringComparison.OrdinalIgnoreCase)
-           || string.Equals(user.Role, Roles.Pm, StringComparison.OrdinalIgnoreCase);
 }

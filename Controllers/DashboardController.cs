@@ -111,8 +111,11 @@ public class DashboardController : AppController
             .ToListAsync();
 
         var userIds = users.Select(u => u.Id).ToList();
+        var yesterday = today.AddDays(-1);
         var todaysRows = await Db.Attendances
-            .Where(a => a.WorkDate == today && userIds.Contains(a.UserId))
+            .Where(a => userIds.Contains(a.UserId)
+                        && (a.WorkDate == today
+                            || (a.WorkDate == yesterday && a.CheckOut == null)))
             .OrderByDescending(a => a.CheckIn)
             .ToListAsync();
         var todays = todaysRows
@@ -125,15 +128,17 @@ public class DashboardController : AppController
                       .ThenByDescending(x => x.CheckIn)
                       .First());
 
+        var relevantScheduleDates = new[] { yesterday, today };
         var todaysScheduleRows = await Db.ScheduleEntries
-            .Where(s => s.WorkDate == today && userIds.Contains(s.UserId))
+            .Where(s => relevantScheduleDates.Contains(s.WorkDate)
+                        && userIds.Contains(s.UserId))
             .OrderByDescending(s => s.Id)
             .ToListAsync();
         var todaysSchedule = todaysScheduleRows
-            .GroupBy(s => s.UserId)
+            .GroupBy(s => (s.UserId, s.WorkDate))
             .ToDictionary(g => g.Key, g => g.First());
         var todayHolidayRows = await Db.Holidays
-            .Where(h => h.Date == today)
+            .Where(h => relevantScheduleDates.Contains(h.Date))
             .ToListAsync();
 
         var rows = new List<TeamRowViewModel>();
@@ -148,14 +153,16 @@ public class DashboardController : AppController
             if (isOnline) online++;
             if (state == "lunch") lunch++;
             todays.TryGetValue(u.Id, out var att);
-            todaysSchedule.TryGetValue(u.Id, out var sched);
-            var isHoliday = IsHolidayForUser(u, todayHolidayRows);
+            var activeWorkDate = att?.WorkDate ?? today;
+            todaysSchedule.TryGetValue((u.Id, activeWorkDate), out var sched);
+            var isHoliday = IsHolidayForUser(
+                u, todayHolidayRows.Where(h => h.Date == activeWorkDate));
             if (isHoliday)
             {
                 sched = new ScheduleEntry
                 {
                     UserId = u.Id,
-                    WorkDate = today,
+                    WorkDate = activeWorkDate,
                     WorkType = "Holiday",
                     IsWorking = false,
                 };
@@ -389,6 +396,15 @@ public class DashboardController : AppController
             }
         }
 
+        ScheduleEntry? attendanceSchedule = null;
+        Holiday? attendanceHoliday = null;
+        if (myAttendance is not null)
+        {
+            attendanceSchedule = await DbInitializer.GetEffectiveScheduleForDateAsync(
+                Db, me, myAttendance.WorkDate);
+            attendanceHoliday = await HolidayHelper.GetAsync(Db, me, myAttendance.WorkDate);
+        }
+
         var vm = new EmployeeDashboardViewModel
         {
             Me = me,
@@ -401,9 +417,9 @@ public class DashboardController : AppController
                 ? null
                 : LateCheck.Evaluate(
                     me,
-                    todaySchedule ?? schedule[todayIdx],
+                    attendanceSchedule,
                     myAttendance.CheckIn,
-                    isHoliday: await HolidayHelper.IsHolidayAsync(Db, me, today)),
+                    isHoliday: attendanceHoliday is not null),
             WorkingDays = workingDays,
             WeeklyHours = weeklyHours,
             Recent = recent,

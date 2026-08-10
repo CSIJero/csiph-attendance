@@ -48,11 +48,6 @@ public class ReportsController : AppController
         [FromQuery(Name = "include_off")] bool includeOff = false)
     {
         var vm = await BuildAsync(startRaw, endRaw, bu, userId, includeOff);
-        // Render times in the *viewer's* local zone (IST for India BUs,
-        // PHT otherwise) so the downloaded spreadsheet matches what they
-        // see on screen.
-        var viewer = await GetCurrentUserAsync();
-
         using var wb = new XLWorkbook();
         var ws = wb.AddWorksheet("Daily Report");
 
@@ -88,8 +83,12 @@ public class ReportsController : AppController
             ws.Cell(r, 3).Value = row.EmployeeName;
             ws.Cell(r, 4).Value = row.EmployeeId;
             ws.Cell(r, 5).Value = row.BusinessUnit;
-            ws.Cell(r, 6).Value = row.StartTime is null ? string.Empty : UserClock.Format(viewer, row.StartTime, "HH:mm");
-            ws.Cell(r, 7).Value = row.EndTime is null ? string.Empty : UserClock.Format(viewer, row.EndTime, "HH:mm");
+            ws.Cell(r, 6).Value = string.IsNullOrEmpty(row.StartTimeDisplay)
+                ? string.Empty
+                : $"{row.StartTimeDisplay} {row.TimeZoneLabel}";
+            ws.Cell(r, 7).Value = string.IsNullOrEmpty(row.EndTimeDisplay)
+                ? string.Empty
+                : $"{row.EndTimeDisplay} {row.TimeZoneLabel}";
 
             if (row.HoursRendered > 0 || row.StartTime is not null)
             {
@@ -401,6 +400,13 @@ public class ReportsController : AppController
                     Role = u.Role,
                     StartTime = att?.CheckIn,
                     EndTime = att?.CheckOut,
+                    StartTimeDisplay = att is null
+                        ? string.Empty
+                        : UserClock.Format(u, att.CheckIn, "HH:mm"),
+                    EndTimeDisplay = att?.CheckOut is null
+                        ? string.Empty
+                        : UserClock.Format(u, att.CheckOut, "HH:mm"),
+                    TimeZoneLabel = UserClock.Label(u),
                     HoursRendered = hoursRendered,
                     ScheduledHours = scheduledHours,
                     AttendanceStatus = status,
@@ -539,7 +545,6 @@ public class ReportsController : AppController
     {
         var vm = await BuildWeeklyAsync(weekRaw, weeks, userId, presentOnly);
         var totalDays = vm.WeeksSpan * 7;
-        var viewer = await GetCurrentUserAsync();
 
         using var wb = new XLWorkbook();
         var ws = wb.AddWorksheet($"Week {vm.WeekStart:yyyy-MM-dd}");
@@ -584,12 +589,14 @@ public class ReportsController : AppController
                 }
                 else if (att.IsOpen)
                 {
-                    ws.Cell(r, 4 + i).Value = $"{UserClock.Format(viewer, att.CheckIn, "HH:mm")} (open)";
+                    ws.Cell(r, 4 + i).Value =
+                        $"{UserClock.Format(u, att.CheckIn, "HH:mm")} {UserClock.Label(u)} (open)";
                 }
                 else
                 {
                     ws.Cell(r, 4 + i).Value =
-                        $"{UserClock.Format(viewer, att.CheckIn, "HH:mm")}-{UserClock.Format(viewer, att.CheckOut, "HH:mm")} ({att.DurationMinutes}m)";
+                        $"{UserClock.Format(u, att.CheckIn, "HH:mm")}-{UserClock.Format(u, att.CheckOut, "HH:mm")} " +
+                        $"{UserClock.Label(u)} ({att.DurationMinutes}m)";
                 }
             }
 

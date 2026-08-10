@@ -1,7 +1,6 @@
 @model WeeklyAttendanceViewModel
 @{
     ViewData["Title"] = "Weekly attendance";
-    var viewer = ViewData["ViewerUser"] as User;
     var totalDays = Model.WeeksSpan * 7;
     var rangeEnd = Model.WeekStart.AddDays(totalDays - 1);
 
@@ -173,12 +172,12 @@
                                     }
                                     else if (att.IsOpen)
                                     {
-                                        <div>@UserClock.Format(viewer, att.CheckIn, "HH:mm")</div>
+                                        <div>@UserClock.Format(wr.User, att.CheckIn, "HH:mm")</div>
                                         <span class="badge badge-active">Working</span>
                                     }
                                     else
                                     {
-                                        <div>@UserClock.Format(viewer, att.CheckIn, "HH:mm")&ndash;@UserClock.Format(viewer, att.CheckOut, "HH:mm")</div>
+                                        <div>@UserClock.Format(wr.User, att.CheckIn, "HH:mm")&ndash;@UserClock.Format(wr.User, att.CheckOut, "HH:mm")</div>
                                         <small class="muted">@PhTime.FormatDurationMinutes(att.DurationMinutes)</small>
                                     }
                                 </td>

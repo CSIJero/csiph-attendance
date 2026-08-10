@@ -1,7 +1,6 @@
 @model DailyReportViewModel
 @{
     ViewData["Title"] = "Daily Report";
-    var viewer = ViewData["ViewerUser"] as User;
 }
 
 @await Html.PartialAsync("_ReportTabs", "daily")
@@ -135,11 +134,17 @@
                             <td>@row.EmployeeId</td>
                             <td>@row.BusinessUnit</td>
                             <td>
-                                @if (row.StartTime is not null) { @UserClock.Format(viewer, row.StartTime, "HH:mm") }
+                                @if (row.StartTime is not null)
+                                {
+                                    @row.StartTimeDisplay <small class="muted">@row.TimeZoneLabel</small>
+                                }
                                 else { <span class="muted">&mdash;</span> }
                             </td>
                             <td>
-                                @if (row.EndTime is not null) { @UserClock.Format(viewer, row.EndTime, "HH:mm") }
+                                @if (row.EndTime is not null)
+                                {
+                                    @row.EndTimeDisplay <small class="muted">@row.TimeZoneLabel</small>
+                                }
                                 else if (row.StartTime is not null) { <span class="badge badge-active">Working</span> }
                                 else { <span class="muted">&mdash;</span> }
                             </td>

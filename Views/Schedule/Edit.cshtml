@@ -32,7 +32,11 @@
             }
             else if (Model.Editable)
             {
-                <text>Pick the calendar dates this team member works in @monthLabel. Toggle a day off if they're not working it.</text>
+                <text>
+                    Pick the calendar dates this team member works in @monthLabel.
+                    Overnight shifts are supported for every employee (for example,
+                    <code>16:00 &rarr; 00:00</code>).
+                </text>
             }
             else
             {
@@ -109,8 +113,19 @@
             @if (Model.ViewerIsAdmin)
             {
                 <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-left:auto;">
-                          <a class="btn"
-                              href="/schedule/schedule-template-v2.xlsx?month=@monthIso">Schedule Template (Updated)</a>
+                    <form method="get"
+                          asp-controller="Schedule"
+                          asp-action="ScheduleTemplate"
+                          style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+                        <input type="hidden" name="month" value="@monthIso" />
+                        <label class="inline-label">Template for
+                            <select name="user_id">
+                                <option value="@Model.Target.Id">@Model.Target.FullName only (recommended)</option>
+                                <option value="">All visible employees</option>
+                            </select>
+                        </label>
+                        <button type="submit" class="btn">Download template</button>
+                    </form>
 
                     <form method="post"
                           enctype="multipart/form-data"
@@ -123,6 +138,7 @@
                         <input type="file" name="file" accept=".csv,.xlsx,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" required />
                         <button type="submit" class="btn btn-primary">Upload bulk schedule</button>
                     </form>
+                    <small class="muted">Uploading updates every non-empty employee schedule included in the file.</small>
                 </div>
             }
         </div>

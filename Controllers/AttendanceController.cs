@@ -1050,12 +1050,18 @@ public class AttendanceController : AppController
         var todaySched = await DbInitializer.GetEffectiveScheduleForDateAsync(Db, me, today);
         var todayIdx = ((int)today.DayOfWeek + 6) % 7;
 
-        // ----- 1. Currently inside today's shift window? --------------
-        // For wrap-around shifts (e.g. 22:00 -> 06:00) accept either side
-        // of midnight without trying to map current time onto a 0..48
-        // axis. The helper on ScheduleEntry already encodes this.
+        // ----- 1. Currently inside yesterday/today's shift window? -----
+        // At 02:00, today's 22:00 -> 06:00 row is still in the future;
+        // yesterday's row is the one that covers the timestamp.
+        var yesterday = today.AddDays(-1);
+        var yesterdaySched = await DbInitializer.GetEffectiveScheduleForDateAsync(Db, me, yesterday);
+        if (yesterdaySched?.CoversLocal(nowLocal.DateTime) == true)
+        {
+            return new ClockInPolicy(true, false, null, yesterday);
+        }
+
         if (todaySched is { IsWorking: true, StartTime: not null, EndTime: not null }
-            && todaySched.CoversTime(nowTime))
+            && todaySched.CoversLocal(nowLocal.DateTime))
         {
             return new ClockInPolicy(true, false, null, today);
         }
@@ -1142,26 +1148,22 @@ public class AttendanceController : AppController
 
         var today = PhTime.Today;
         var nowPh = PhTime.Now;
-        var nowTime = TimeOnly.FromDateTime(nowPh.DateTime);
-
         var schedYesterday = await DbInitializer.GetScheduleForDateAsync(Db, me, today.AddDays(-1));
         var schedToday     = await DbInitializer.GetScheduleForDateAsync(Db, me, today);
         var schedTomorrow  = await DbInitializer.GetScheduleForDateAsync(Db, me, today.AddDays(1));
 
         // Currently inside today's shift window?
         if (schedToday is { IsWorking: true, StartTime: not null, EndTime: not null }
-            && schedToday.CoversTime(nowTime))
+            && schedToday.CoversLocal(nowPh.DateTime))
         {
             return new ClockInPolicy(true, false, null, today);
         }
 
         // Yesterday's overnight shift (e.g. 22:00 -> 06:00) may still be
         // covering today's early hours.
-        if (schedYesterday is { IsWorking: true, StartTime: { } sy, EndTime: { } ey }
-            && ey <= sy
-            && nowTime < ey)
+        if (schedYesterday?.CoversLocal(nowPh.DateTime) == true)
         {
-            return new ClockInPolicy(true, false, null, today);
+            return new ClockInPolicy(true, false, null, today.AddDays(-1));
         }
 
         // Compute the next upcoming shift start (today first, then tomorrow).

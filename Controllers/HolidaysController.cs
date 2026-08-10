@@ -26,7 +26,7 @@ public class HolidaysController : AppController
         if (!string.IsNullOrWhiteSpace(country))
             q = q.Where(h => h.Country == country);
         var rows = await q
-            .OrderByDescending(h => h.Date)
+            .OrderBy(h => h.Date)
             .ThenBy(h => h.Country)
             .Take(500)
             .ToListAsync();

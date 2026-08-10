@@ -376,7 +376,7 @@
                         <td data-cell="clock-in">
                             @if (row.Attendance is { } a)
                             {
-                                @UserClock.Format(viewer, a.CheckIn, "HH:mm")
+                                @UserClock.Format(row.User, a.CheckIn, "HH:mm")
                                 if (row.Late is { Status: LateCheck.LateStatus.Late } late)
                                 {
                                     var h = late.LateMinutes / 60;
@@ -401,7 +401,7 @@
                         <td data-cell="clock-out">
                             @if (row.Attendance is { } co && co.CheckOut is not null)
                             {
-                                @UserClock.Format(viewer, co.CheckOut, "HH:mm")
+                                @UserClock.Format(row.User, co.CheckOut, "HH:mm")
                             }
                             else if (row.Attendance is { } open && open.IsOpen)
                             {

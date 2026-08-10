@@ -73,13 +73,10 @@ public class Attendance
             DateTime co;
             if (CheckOut is null)
             {
-                // Still open: show elapsed time, but never let a forgotten
-                // session count past the end of the check-in's PHT day.
-                // (The OfflineNotifier auto-closes at 23:30 anyway; this
-                // is only here so an unclosed session doesn't display a
-                // 30+ hour duration before that sweep runs.)
+                // Preserve legitimate overnight duration while retaining a
+                // defensive ceiling until the notifier auto-closes the row.
                 var now = DateTime.UtcNow;
-                var cutoff = GetEndOfPhDayUtc(ci);
+                var cutoff = ci.AddHours(24);
                 co = now < cutoff ? now : cutoff;
             }
             else
@@ -95,16 +92,6 @@ public class Attendance
                 (co - ci).TotalMinutes,
                 MidpointRounding.AwayFromZero);
         }
-    }
-
-    // End of the check-in's PHT calendar day (23:59:59), expressed as UTC.
-    // Used only as a soft cap for OPEN sessions so an unclosed row doesn't
-    // display a runaway duration before the notifier auto-closes it.
-    private static DateTime GetEndOfPhDayUtc(DateTime checkInUtc)
-    {
-        var local = checkInUtc.ToUniversalTime().AddHours(8); // PHT
-        var endOfDayLocal = new DateTime(local.Year, local.Month, local.Day, 23, 59, 59);
-        return endOfDayLocal.AddHours(-8); // back to UTC
     }
 
     [NotMapped]

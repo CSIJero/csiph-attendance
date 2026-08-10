@@ -418,6 +418,9 @@ public class DailyReportRow
     public string Role { get; set; } = string.Empty;
     public DateTime? StartTime { get; set; }   // UTC; format with PhTime for display
     public DateTime? EndTime { get; set; }     // UTC; null when still open
+    public string StartTimeDisplay { get; set; } = string.Empty;
+    public string EndTimeDisplay { get; set; } = string.Empty;
+    public string TimeZoneLabel { get; set; } = string.Empty;
     public double HoursRendered { get; set; }  // 0 when no check-in or open
     public string AttendanceStatus { get; set; } = string.Empty; // Complete | Incomplete | Incomplete Hours | Absent
     /// <summary>Onsite | Offsite | Dayoff — the schedule's working type.</summary>
@@ -555,4 +558,3 @@ public class FaceEnrollHistoryItem
     /// <summary>Data-URL JPEG (already trimmed at capture time).</summary>
     public string Photo { get; set; } = string.Empty;
 }
-

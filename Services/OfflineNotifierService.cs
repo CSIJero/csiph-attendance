@@ -215,12 +215,10 @@ public class OfflineNotifierService : BackgroundService
             // / India 60). Support / Dayoff / Admin all return NotApplicable.
             if (isEmployee && !state.LateAlertSent)
             {
-                var lateOffset = UserClock.OffsetFor(u);
-                var ciUtc = DateTime.SpecifyKind(att.CheckIn, DateTimeKind.Utc);
-                var ciLocal = new DateTimeOffset(ciUtc, TimeSpan.Zero).ToOffset(lateOffset).DateTime;
-                var ciDate = DateOnly.FromDateTime(ciLocal);
-                var schedForLate = await DbInitializer.GetEffectiveScheduleForDateAsync(db, u, ciDate);
-                var isHolidayForCheckInDate = await IsHolidayForLocalDateAsync(u, ciDate);
+                var schedForLate = await DbInitializer.GetEffectiveScheduleForDateAsync(
+                    db, u, att.WorkDate);
+                var isHolidayForCheckInDate = await IsHolidayForLocalDateAsync(
+                    u, att.WorkDate);
                 var late = LateCheck.Evaluate(
                     u,
                     schedForLate,
@@ -251,14 +249,13 @@ public class OfflineNotifierService : BackgroundService
                 var nowLocal = new DateTimeOffset(nowUtc, TimeSpan.Zero).ToOffset(offset).DateTime;
                 var checkInUtc = DateTime.SpecifyKind(att.CheckIn, DateTimeKind.Utc);
                 var checkInLocal = new DateTimeOffset(checkInUtc, TimeSpan.Zero).ToOffset(offset).DateTime;
-                var checkInDate = DateOnly.FromDateTime(checkInLocal);
-
-                var schedule = await DbInitializer.GetEffectiveScheduleForDateAsync(db, u, checkInDate);
+                var schedule = await DbInitializer.GetEffectiveScheduleForDateAsync(
+                    db, u, att.WorkDate);
                 DateTime? scheduledEndLocal = null;
                 if (schedule is { IsWorking: true, StartTime: { } sStart, EndTime: { } sEnd }
                     && !schedule.EffectiveWorkType.Equals("Dayoff", StringComparison.OrdinalIgnoreCase))
                 {
-                    var endDate = checkInDate;
+                    var endDate = att.WorkDate;
                     // Overnight shift (e.g. 22:00 -> 06:00): bump end date so
                     // the scheduled end lands AFTER check-in, not 16h before.
                     if (sEnd <= sStart) endDate = endDate.AddDays(1);
@@ -482,28 +479,41 @@ public class OfflineNotifierService : BackgroundService
         var checkInUtc = DateTime.SpecifyKind(att.CheckIn, DateTimeKind.Utc);
         var checkInLocal = new DateTimeOffset(checkInUtc, TimeSpan.Zero).ToOffset(offset).DateTime;
 
-        // Auto-close policy (deliberately schedule-INDEPENDENT — we do not
-        // anchor on the user's scheduled shift end):
+        // Auto-close policy:
         //   - Support / Copilot rotation users: cap on elapsed time, since
         //     a 24/7 rotation can span any wall-clock window. CheckOut =
         //     CheckIn + 23 hours.
+        //   - Authored overnight shifts: close at their next-day scheduled
+        //     end instead of truncating them at 23:30.
         //   - Everyone else (normal employees): fixed daily cutoff at
         //     23:30 local time of the check-in date. If the user clocked
         //     in after 23:30 the cutoff rolls to 23:30 the next day so we
         //     do not immediately close a brand-new row.
         DateTime cutoffLocal;
+        var isOvernightScheduledShift = false;
         if (u.IsSupport)
         {
             cutoffLocal = checkInLocal.AddHours(23);
         }
         else
         {
-            cutoffLocal = new DateTime(
-                checkInLocal.Year, checkInLocal.Month, checkInLocal.Day,
-                23, 30, 0);
-            if (cutoffLocal <= checkInLocal)
+            var schedule = await DbInitializer.GetEffectiveScheduleForDateAsync(
+                db, u, att.WorkDate);
+            if (schedule is { IsWorking: true, StartTime: { } start, EndTime: { } end }
+                && end <= start)
             {
-                cutoffLocal = cutoffLocal.AddDays(1);
+                isOvernightScheduledShift = true;
+                cutoffLocal = att.WorkDate.AddDays(1).ToDateTime(end);
+            }
+            else
+            {
+                cutoffLocal = new DateTime(
+                    checkInLocal.Year, checkInLocal.Month, checkInLocal.Day,
+                    23, 30, 0);
+                if (cutoffLocal <= checkInLocal)
+                {
+                    cutoffLocal = cutoffLocal.AddDays(1);
+                }
             }
         }
 
@@ -528,12 +538,17 @@ public class OfflineNotifierService : BackgroundService
                 }
                 else
                 {
-                    body =
-                        $"Hi {u.FullName},\r\n\r\n" +
-                        $"Open sessions are auto-closed daily at 23:30 {tzLabel}. " +
-                        $"Please check out by {cutoffLocal:HH:mm} {tzLabel} to close " +
-                        "your attendance cleanly.\r\n\r\n" +
-                        "This is an automated reminder.\r\n";
+                    body = isOvernightScheduledShift
+                        ? $"Hi {u.FullName},\r\n\r\n" +
+                          $"Your overnight session will be auto-closed at its scheduled end, " +
+                          $"{cutoffLocal:HH:mm} {tzLabel}. Please check out before then to close " +
+                          "your attendance cleanly.\r\n\r\n" +
+                          "This is an automated reminder.\r\n"
+                        : $"Hi {u.FullName},\r\n\r\n" +
+                          $"Open sessions are auto-closed daily at 23:30 {tzLabel}. " +
+                          $"Please check out by {cutoffLocal:HH:mm} {tzLabel} to close " +
+                          "your attendance cleanly.\r\n\r\n" +
+                          "This is an automated reminder.\r\n";
                 }
                 await TrySendAndRecordAsync(db, email, AlertLevel.RequiredLogout, u, recipients, subject, body, 0, ct);
             }
