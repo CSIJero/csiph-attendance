@@ -29,7 +29,7 @@ public class ViolationsController : AppController
         _email = email;
     }
 
-    [Authorize(Policy = "AdminOnly")]
+    [Authorize(Policy = "AdminOrOperations")]
     [HttpGet("")]
     public async Task<IActionResult> Index(string? filter = null)
     {
@@ -72,6 +72,7 @@ public class ViolationsController : AppController
         return View("Index", new ViolationsIndexViewModel
         {
             Rows = rows,
+            IsReadOnly = IsOperations,
             Filter = f,
             PendingCount = pendingCount,
             InvestigateCount = investigateCount,

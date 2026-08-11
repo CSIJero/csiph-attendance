@@ -110,10 +110,12 @@ public class UsersController : AppController
             assignedRole = user.Role;
         }
 
-        // Only a pure admin can elevate a registration into the admin or
-        // program-manager tier; PMs can still approve into pm / employee.
+        // Only a pure admin can elevate a registration into the admin,
+        // program-manager, or operations tier.
         if (!IsPureAdmin
-            && (assignedRole == Roles.Admin || assignedRole == Roles.ProgramManager))
+            && (assignedRole == Roles.Admin
+                || assignedRole == Roles.ProgramManager
+                || assignedRole == Roles.Operations))
         {
             TempData.Flash(
                 "Only an administrator can approve into that role.",
@@ -263,10 +265,11 @@ public class UsersController : AppController
         }
 
         // Only a pure admin can delete another admin-tier account.
-        if (!IsPureAdmin && Roles.IsAdminRole(user.Role))
+        if (!IsPureAdmin
+            && (Roles.IsAdminRole(user.Role) || user.Role == Roles.Operations))
         {
             TempData.Flash(
-                "Only an administrator can delete an admin / PM account.",
+                "Only an administrator can delete an elevated account.",
                 "danger");
             return RedirectToAction(nameof(Index));
         }
@@ -328,6 +331,12 @@ public class UsersController : AppController
         if (user is null)
         {
             TempData.Flash("That user no longer exists.", "danger");
+            return RedirectToAction(nameof(Index));
+        }
+
+        if (!IsPureAdmin && user.Role == Roles.Operations)
+        {
+            TempData.Flash("Only an administrator can deactivate an Operations account.", "danger");
             return RedirectToAction(nameof(Index));
         }
 
@@ -485,6 +494,12 @@ public class UsersController : AppController
             return RedirectToAction(nameof(Index));
         }
 
+        if (!IsPureAdmin && user.Role == Roles.Operations)
+        {
+            TempData.Flash("Only an administrator can edit an Operations account.", "danger");
+            return RedirectToAction(nameof(Index));
+        }
+
         var fullName = (vm.FullName ?? string.Empty).Trim();
         var username = (vm.Username ?? string.Empty).Trim();
         var email = (vm.Email ?? string.Empty).Trim();
@@ -522,8 +537,10 @@ public class UsersController : AppController
         var managerId = vm.ManagerId;
 
         // Privilege-escalation guard: only pure admins can grant the
-        // "admin" or "program_manager" tier.
-        var elevatingToAdminTier = (role == Roles.Admin || role == Roles.ProgramManager)
+        // "admin", "program_manager", or "operations" tier.
+        var elevatingToAdminTier = (role == Roles.Admin
+                                    || role == Roles.ProgramManager
+                                    || role == Roles.Operations)
             && role != user.Role;
         if (!IsPureAdmin && elevatingToAdminTier)
         {
@@ -847,8 +864,11 @@ public class UsersController : AppController
             errors["Password"] = "Password must contain at least one letter and one digit.";
         }
 
-        // Privilege guard: only pure admins can mint an admin or program-manager.
-        if (!IsPureAdmin && (role == Roles.Admin || role == Roles.ProgramManager))
+        // Privilege guard: only pure admins can mint an elevated role.
+        if (!IsPureAdmin
+            && (role == Roles.Admin
+                || role == Roles.ProgramManager
+                || role == Roles.Operations))
         {
             errors["Role"] = "Only an administrator can create that role.";
         }
@@ -924,11 +944,12 @@ public class UsersController : AppController
         }
 
         // PMs can't reset another admin's password — escalation hazard.
-        if (!IsPureAdmin && Roles.IsAdminRole(user.Role)
+        if (!IsPureAdmin
+            && (Roles.IsAdminRole(user.Role) || user.Role == Roles.Operations)
             && user.Id != CurrentUserId)
         {
             TempData.Flash(
-                "Only an administrator can reset an admin / PM account's password.",
+                "Only an administrator can reset an elevated account's password.",
                 "danger");
             return RedirectToAction(nameof(Index));
         }

@@ -5,6 +5,7 @@
 @model AttendanceMonitoring.ViewModels.EditRequestsIndexViewModel
 @{
     ViewData["Title"] = "Attendance edit requests";
+    var isOperationsRequests = ViewBag.IsOperationsRequests is true;
 
     // Sub-tab badge counts — same queries as the layout, scoped to admins
     // (this view is admin-only by policy).
@@ -45,6 +46,8 @@
 
 @await Html.PartialAsync("_RequestsTabs", ("edits", pendingEdit, pendingLeave, pendingShift, pendingQuota))
 
+@if (!isOperationsRequests)
+{
 <section class="card">
     <div class="card-header">
         <h2>Attendance edits &mdash; pending review</h2>
@@ -262,11 +265,12 @@
         </script>
     }
 </section>
+}
 
 <section class="card">
     <div class="card-header">
-        <h2>Recently decided</h2>
-        <small class="muted">Last 25 approved / rejected requests.</small>
+        <h2>@(isOperationsRequests ? "PM-approved attendance edits" : "Recently decided")</h2>
+        <small class="muted">@(isOperationsRequests ? "Read-only Operations view." : "Last 25 approved / rejected requests.")</small>
     </div>
     @if (Model.Recent.Count == 0)
     {

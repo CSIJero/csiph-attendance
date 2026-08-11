@@ -873,7 +873,7 @@ public static class DbInitializer
     }
 
     /// <summary>
-    /// Seeds the four canonical roles into <c>role_definitions</c> on the
+    /// Seeds the five canonical roles into <c>role_definitions</c> on the
     /// very first boot after this feature ships, marking them
     /// <c>IsBuiltIn=true</c> so the admin can't delete them from the
     /// Configuration page. Idempotent: skips any row already present by
@@ -886,6 +886,7 @@ public static class DbInitializer
             ("Administrator",     Models.Roles.Admin),
             ("Program Manager",   Models.Roles.ProgramManager),
             ("Project Manager",   Models.Roles.Pm),
+            ("Operations",        Models.Roles.Operations),
             ("Employee",          Models.Roles.Employee),
         };
 

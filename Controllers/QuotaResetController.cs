@@ -27,9 +27,38 @@ public class QuotaResetController : AppController
     // employees viewing this URL get bounced to their dashboard.
     // ------------------------------------------------------------------
     [HttpGet("")]
-    [Authorize(Policy = "AdminOnly")]
-    public async Task<IActionResult> Index()
+    [Authorize(Policy = "AdminOrOperations")]
+    public async Task<IActionResult> Index([FromQuery] string? bu = null)
     {
+        var businessUnitFilter = RuntimeConfig.NormaliseBusinessUnit(bu);
+        ViewBag.IsOperationsRequests = IsOperations;
+        ViewBag.BusinessUnitFilter = businessUnitFilter;
+        ViewBag.BusinessUnits = RuntimeConfig.GetBusinessUnits();
+
+        if (IsOperations)
+        {
+            var approved = Db.QuotaResetRequests
+                .Include(r => r.User)
+                .Include(r => r.RequestedByUser)
+                .Include(r => r.DecidedByUser)
+                .Where(r => r.Status == "Approved"
+                            && r.DecidedByUser != null
+                            && r.DecidedByUser.Role == Roles.Pm);
+            if (!string.IsNullOrWhiteSpace(businessUnitFilter))
+            {
+                approved = approved.Where(r =>
+                    r.User != null && r.User.BusinessUnit == businessUnitFilter);
+            }
+
+            return View("Index", new QuotaResetIndexViewModel
+            {
+                Recent = await approved
+                    .OrderByDescending(r => r.DecidedAt)
+                    .Take(100)
+                    .ToListAsync(),
+            });
+        }
+
         var visibleIds = await (await GetVisibleUsersAsync(includeAdmins: IsPureAdmin))
             .Select(u => u.Id)
             .ToListAsync();
@@ -77,6 +106,8 @@ public class QuotaResetController : AppController
         [FromForm] string? kind,
         [FromForm] string? reason)
     {
+        if (IsOperations) return Forbid();
+
         var me = await GetCurrentUserAsync();
         if (me is null) return Challenge();
 

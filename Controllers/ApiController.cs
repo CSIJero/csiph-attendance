@@ -770,7 +770,8 @@ public class ApiController : ControllerBase
     private async Task<List<User>> VisibleUsersAsync()
     {
         // Pure admin: see every non-admin user.
-        if (User.IsInRole(Models.Roles.Admin))
+        if (User.IsInRole(Models.Roles.Admin)
+            || User.IsInRole(Models.Roles.Operations))
         {
             return await _db.Users
                 .Where(u => u.Role != Models.Roles.Admin)
@@ -820,7 +821,8 @@ public class ApiController : ControllerBase
     private async Task<bool> CanViewAsync(int meId, int targetId)
     {
         if (meId == targetId) return true;
-        if (User.IsInRole(Models.Roles.Admin)) return true;
+        if (User.IsInRole(Models.Roles.Admin)
+            || User.IsInRole(Models.Roles.Operations)) return true;
 
         // Program Manager: target must live in one of the PgM's BUs.
         if (User.IsInRole(Models.Roles.ProgramManager))

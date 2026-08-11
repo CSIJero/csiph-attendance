@@ -21,7 +21,7 @@ namespace AttendanceMonitoring.Controllers;
 /// export as empty cells so downstream tooling / managers can fill them in
 /// without disturbing the column layout.
 /// </summary>
-[Authorize(Policy = "AdminOnly")]
+[Authorize(Policy = "AdminOrOperations")]
 [Route("reports")]
 public class ReportsController : AppController
 {

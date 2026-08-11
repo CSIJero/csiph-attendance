@@ -11,10 +11,11 @@ namespace AttendanceMonitoring.Models;
 /// dropdown (e.g. "Project Manager", "Senior Engineer"). <see cref="BaseRole"/>
 /// is the canonical permission tier that authorization decisions hinge on
 /// (one of <see cref="Roles.Admin"/>, <see cref="Roles.ProgramManager"/>,
-/// <see cref="Roles.Pm"/> or <see cref="Roles.Employee"/>).
+/// <see cref="Roles.Pm"/>, <see cref="Roles.Operations"/> or
+/// <see cref="Roles.Employee"/>).
 /// </para>
 /// <para>
-/// Four built-in rows are seeded by <c>DbInitializer</c> and marked
+/// Five built-in rows are seeded by <c>DbInitializer</c> and marked
 /// <see cref="IsBuiltIn"/> so the admin can't accidentally delete them
 /// out from under existing users.
 /// </para>
@@ -30,7 +31,7 @@ public class RoleDefinition
 
     /// <summary>
     /// Canonical permission tier this role inherits from. Stored as a
-    /// lowercase token (admin / program_manager / pm / employee) so it
+    /// lowercase token (admin / program_manager / pm / operations / employee) so it
     /// matches <see cref="User.Role"/> and the
     /// <see cref="Roles"/> constants directly. Defaults to
     /// <see cref="Roles.Employee"/> so custom rows never accidentally
@@ -40,8 +41,8 @@ public class RoleDefinition
     public string BaseRole { get; set; } = Roles.Employee;
 
     /// <summary>
-    /// True for the four canonical seed rows (Administrator, Program
-    /// Manager, Project Manager, Employee). Built-in rows can't be
+    /// True for the five canonical seed rows (Administrator, Program
+    /// Manager, Project Manager, Operations, Employee). Built-in rows can't be
     /// deleted from the Configuration page so we never end up with a
     /// permission tier that has no role definition pointing at it.
     /// </summary>
@@ -49,4 +50,3 @@ public class RoleDefinition
 
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 }
-

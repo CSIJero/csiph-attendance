@@ -3,13 +3,15 @@ namespace AttendanceMonitoring.Models;
 /// <summary>
 /// Canonical role names used for authorization and role checks.
 /// <c>admin</c>, <c>program_manager</c> and <c>pm</c> (Project Manager)
-/// all grant administrative access; visibility scope differs per role.
+/// grant administrative access; <c>operations</c> has a separate read-heavy
+/// permission set for dashboards, reports, requests, reminders, and holidays.
 /// </summary>
 public static class Roles
 {
     public const string Admin = "admin";
     public const string ProgramManager = "program_manager";
     public const string Pm = "pm";
+    public const string Operations = "operations";
     public const string Employee = "employee";
 
     /// <summary>Roles that have administrative access (any tier).</summary>
@@ -20,7 +22,7 @@ public static class Roles
         || string.Equals(role, ProgramManager, System.StringComparison.OrdinalIgnoreCase)
         || string.Equals(role, Pm, System.StringComparison.OrdinalIgnoreCase);
 
-    /// <summary>Normalises any incoming role string to one of the four canonical values.</summary>
+    /// <summary>Normalises any incoming role string to one of the five canonical values.</summary>
     public static string Normalise(string? role)
     {
         var lower = (role ?? string.Empty).Trim().ToLowerInvariant();
@@ -31,6 +33,8 @@ public static class Roles
             "programmanager" => ProgramManager, // tolerate no-underscore spelling
             "program manager" => ProgramManager, // tolerate spaced spelling
             Pm => Pm,
+            Operations => Operations,
+            "operation" => Operations,
             _ => Employee,
         };
     }
@@ -40,6 +44,7 @@ public static class Roles
         Admin => "Administrator",
         ProgramManager => "Program Manager",
         Pm => "Project Manager",
+        Operations => "Operations",
         _ => "Employee",
     };
 }

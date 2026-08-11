@@ -15,6 +15,7 @@
     var isAdmin = http?.User?.IsInRole("admin") == true
                   || http?.User?.IsInRole("program_manager") == true
                   || http?.User?.IsInRole("pm") == true;
+    var isOperations = http?.User?.IsInRole(AttendanceMonitoring.Models.Roles.Operations) == true;
     var thresholdSeconds = AttendanceMonitoring.Models.Constants.DefaultOnlineThresholdSeconds;
     // Per-viewer wall clock: prefers the browser timezone reported via
     // the `tz` cookie (#4 — global TZ); falls back to BU-derived offset.
@@ -65,7 +66,7 @@
     var inboxInvestigateCount = 0;
     var meId = 0;
     _ = int.TryParse(http?.User?.FindFirst(ClaimTypes.NameIdentifier)?.Value, out meId);
-    if (isAuthed && isAdmin)
+    if (isAuthed && (isAdmin || isOperations))
     {
         try
         {
@@ -295,7 +296,7 @@
                 <div class="sidebar-section-label">Navigation</div>
                 <nav class="sidebar-nav">
                     <a asp-controller="Dashboard" asp-action="Index" class="@NavCss("Dashboard")">Dashboard</a>
-                    @if (!isAdmin)
+                    @if (!isAdmin && !isOperations)
                     {
                         <a asp-controller="Schedule" asp-action="Edit" class="@NavCss("Schedule")">My Schedule</a>
                         @* "My Attendance" highlights only when actually on the
@@ -376,6 +377,19 @@
                             <a asp-controller="LeaveBalances" asp-action="Index" class="@NavCss("LeaveBalances")">Leave Balances</a>
                             <a asp-controller="Settings" asp-action="Index" class="@NavCss("Settings")">Settings</a>
                         }
+                    }
+                    @if (isOperations)
+                    {
+                        var operationsRequestsActive = activeController == "attendance"
+                            || activeController == "leave"
+                            || activeController == "quotareset"
+                            || (activeController == "schedule" && activeAction.StartsWith("amend"))
+                            ? "nav-link active"
+                            : "nav-link";
+                        <a asp-controller="Reports" asp-action="Daily" class="@NavCss("Reports")">Reports</a>
+                        <a asp-controller="Attendance" asp-action="EditRequests" class="@operationsRequestsActive">Requests</a>
+                        <a asp-controller="Violations" asp-action="Index" class="@NavCss("Violations")">Reminders</a>
+                        <a asp-controller="Holidays" asp-action="Index" class="@NavCss("Holidays")">Holidays</a>
                     }
                 </nav>
 

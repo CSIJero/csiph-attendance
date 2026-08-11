@@ -305,7 +305,8 @@
                     var approveRoleChoices = Model.RoleLabelChoices
                         .Where(d => isPureAdmin
                             || (d.BaseRole != AttendanceMonitoring.Models.Roles.Admin
-                             && d.BaseRole != AttendanceMonitoring.Models.Roles.ProgramManager))
+                             && d.BaseRole != AttendanceMonitoring.Models.Roles.ProgramManager
+                             && d.BaseRole != AttendanceMonitoring.Models.Roles.Operations))
                         .ToList();
                 }
                 <label class="field-block">

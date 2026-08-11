@@ -5,6 +5,7 @@
 @model AttendanceMonitoring.ViewModels.QuotaResetIndexViewModel
 @{
     ViewData["Title"] = "Break / lunch reset requests";
+    var isOperationsRequests = ViewBag.IsOperationsRequests is true;
 
     var pendingEdit = 0;
     var pendingLeave = 0;
@@ -31,6 +32,8 @@
 
 @await Html.PartialAsync("_RequestsTabs", ("quota", pendingEdit, pendingLeave, pendingShift, pendingQuota))
 
+@if (!isOperationsRequests)
+{
 <section class="card">
     <div class="card-header">
         <h2>Break / lunch resets &mdash; pending review</h2>
@@ -200,11 +203,12 @@
         </script>
     }
 </section>
+}
 
 <section class="card">
     <div class="card-header">
-        <h2>Recently decided</h2>
-        <small class="muted">Last 25 approved / rejected requests.</small>
+        <h2>@(isOperationsRequests ? "PM-approved break / lunch resets" : "Recently decided")</h2>
+        <small class="muted">@(isOperationsRequests ? "Read-only Operations view." : "Last 25 approved / rejected requests.")</small>
     </div>
     @if (Model.Recent.Count == 0)
     {

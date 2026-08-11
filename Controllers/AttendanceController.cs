@@ -31,6 +31,8 @@ public class AttendanceController : AppController
     [HttpGet("request-missing-entry")]
     public async Task<IActionResult> RequestMissingEntry()
     {
+        if (IsOperations) return Forbid();
+
         var me = await GetCurrentUserAsync();
         if (me is null) return Challenge();
         var vm = new AddTimeEntryViewModel
@@ -111,6 +113,8 @@ public class AttendanceController : AppController
         [FromForm] string? proof_photo,
         [FromForm(Name = "user_id")] int? targetUserId = null)
     {
+        if (IsOperations) return Forbid();
+
         var me = await GetCurrentUserAsync();
         if (me is null) return Challenge();
 
@@ -1288,6 +1292,8 @@ public class AttendanceController : AppController
     [HttpGet("{id:int}/request-edit")]
     public async Task<IActionResult> RequestEdit(int id)
     {
+        if (IsOperations) return Forbid();
+
         var me = await GetCurrentUserAsync();
         if (me is null) return Challenge();
 
@@ -1327,6 +1333,8 @@ public class AttendanceController : AppController
         [FromForm] string? proof_photo,
         [FromForm(Name = "return_url")] string? returnUrl)
     {
+        if (IsOperations) return Forbid();
+
         var me = await GetCurrentUserAsync();
         if (me is null) return Challenge();
 
@@ -1442,9 +1450,41 @@ public class AttendanceController : AppController
     /// admin / PM, plus the 25 most recent decided ones for context.
     /// </summary>
     [HttpGet("edit-requests")]
-    [Authorize(Policy = "AdminOnly")]
-    public async Task<IActionResult> EditRequests()
+    [Authorize(Policy = "AdminOrOperations")]
+    public async Task<IActionResult> EditRequests([FromQuery] string? bu = null)
     {
+        var businessUnitFilter = RuntimeConfig.NormaliseBusinessUnit(bu);
+        ViewBag.IsOperationsRequests = IsOperations;
+        ViewBag.BusinessUnitFilter = businessUnitFilter;
+        ViewBag.BusinessUnits = RuntimeConfig.GetBusinessUnits();
+
+        if (IsOperations)
+        {
+            var approved = Db.AttendanceEditRequests
+                .Include(r => r.Attendance)
+                    .ThenInclude(a => a!.User)
+                .Include(r => r.RequestedByUser)
+                .Include(r => r.DecidedByUser)
+                .Where(r => r.Status == "Approved"
+                            && r.DecidedByUser != null
+                            && r.DecidedByUser.Role == Roles.Pm);
+            if (!string.IsNullOrWhiteSpace(businessUnitFilter))
+            {
+                approved = approved.Where(r =>
+                    r.Attendance != null
+                    && r.Attendance.User != null
+                    && r.Attendance.User.BusinessUnit == businessUnitFilter);
+            }
+
+            return View("EditRequests", new EditRequestsIndexViewModel
+            {
+                Recent = await approved
+                    .OrderByDescending(r => r.DecidedAt)
+                    .Take(100)
+                    .ToListAsync(),
+            });
+        }
+
         // Pure admins review every request, including requests submitted by
         // admin accounts. PM/PgM reviewers retain their normal user scope.
         var visible = await GetVisibleUsersAsync(includeAdmins: IsPureAdmin);

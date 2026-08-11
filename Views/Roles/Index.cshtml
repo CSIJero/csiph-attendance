@@ -43,6 +43,7 @@
             <select name="baseRole" required>
                 <option value="" disabled selected>&mdash; Pick a tier &mdash;</option>
                 <option value="@AttendanceMonitoring.Models.Roles.Employee">Employee</option>
+                <option value="@AttendanceMonitoring.Models.Roles.Operations">Operations</option>
                 <option value="@AttendanceMonitoring.Models.Roles.Pm">Project Manager</option>
                 <option value="@AttendanceMonitoring.Models.Roles.ProgramManager">Program Manager</option>
                 <option value="@AttendanceMonitoring.Models.Roles.Admin">Administrator</option>
@@ -86,6 +87,7 @@
                             AttendanceMonitoring.Models.Roles.Admin          => "badge badge-danger",
                             AttendanceMonitoring.Models.Roles.ProgramManager => "badge badge-warn",
                             AttendanceMonitoring.Models.Roles.Pm             => "badge badge-active",
+                            AttendanceMonitoring.Models.Roles.Operations     => "badge badge-active",
                             _                                                => "badge badge-done",
                         };
                         <tr>
@@ -151,4 +153,3 @@
         </table>
     </div>
 </section>
-

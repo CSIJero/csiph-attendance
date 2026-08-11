@@ -111,7 +111,8 @@
             var roleChoices = Model.RoleLabelChoices
                 .Where(d => canGrantAdmin
                     || (d.BaseRole != AttendanceMonitoring.Models.Roles.Admin
-                     && d.BaseRole != AttendanceMonitoring.Models.Roles.ProgramManager)
+                     && d.BaseRole != AttendanceMonitoring.Models.Roles.ProgramManager
+                     && d.BaseRole != AttendanceMonitoring.Models.Roles.Operations)
                     || d.Id == Model.RoleLabelId
                     || string.Equals(d.BaseRole, Model.Role, StringComparison.OrdinalIgnoreCase))
                 .ToList();

@@ -19,6 +19,19 @@
         : "subtab";
 }
 
+@if (Model.IsReadOnly)
+{
+    <style>
+        #violations-master-toggle,
+        .violations-group-toggle,
+        .violations-row-toggle,
+        .operations-readonly-actions input,
+        .operations-readonly-actions button {
+            display: none !important;
+        }
+    </style>
+}
+
 <section class="hero">
     <div>
         <h1>Reminders</h1>
@@ -27,6 +40,10 @@
             investigation to request employee explanation, review the
             conversation thread, then close or override.
         </p>
+        @if (Model.IsReadOnly)
+        {
+            <p class="muted"><strong>Read-only:</strong> Operations can review every reminder tab but cannot take actions.</p>
+        }
     </div>
 </section>
 
@@ -198,7 +215,7 @@
                             <th data-sort-type="num">Offline for</th>
                             <th>Email status</th>
                             <th data-no-sort>Thread</th>
-                            <th data-no-sort>Action</th>
+                            <th data-no-sort>@(Model.IsReadOnly ? "Decision" : "Action")</th>
                         </tr>
                     </thead>
                     @foreach (var group in Model.Rows
@@ -283,7 +300,11 @@
                                            submitting it doesn't carry the bulk-form checkboxes.
                                            All action buttons sit in a single horizontal row so
                                            Warning / Override / Clear stay visually aligned. *@
-                                        <div class="row-actions" style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;">
+                                        <div class="row-actions @(Model.IsReadOnly ? "operations-readonly-actions" : "")" style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;">
+                                            @if (Model.IsReadOnly)
+                                            {
+                                                <span class="muted">@(string.IsNullOrWhiteSpace(actionTaken) ? "Pending" : actionTaken)</span>
+                                            }
                                             @if (Model.Filter != "needaction")
                                             {
                                                 <input type="text"

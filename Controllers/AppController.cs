@@ -41,6 +41,9 @@ public abstract class AppController : Controller
     /// <summary>True only for the "pm" role.</summary>
     protected bool IsPm => User.IsInRole(Models.Roles.Pm);
 
+    /// <summary>True only for the "operations" role.</summary>
+    protected bool IsOperations => User.IsInRole(Models.Roles.Operations);
+
     protected async Task<User?> GetCurrentUserAsync()
     {
         var id = CurrentUserId;
@@ -70,7 +73,7 @@ public abstract class AppController : Controller
     protected async Task<IQueryable<User>> GetVisibleUsersAsync(bool includeAdmins = false)
     {
         IQueryable<User> q;
-        if (IsPureAdmin)
+        if (IsPureAdmin || IsOperations)
         {
             q = Db.Users.AsQueryable();
         }
@@ -130,7 +133,7 @@ public abstract class AppController : Controller
     protected async Task<bool> CanViewUserAsync(int targetId)
     {
         if (CurrentUserId == targetId) return true;
-        if (IsPureAdmin) return true;
+        if (IsPureAdmin || IsOperations) return true;
 
         var me = await GetCurrentUserAsync();
         if (me is null) return false;

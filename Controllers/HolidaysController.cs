@@ -13,7 +13,7 @@ namespace AttendanceMonitoring.Controllers;
 /// NotApplicable on a holiday, (2) the dashboard surfaces a banner so
 /// employees know a clock-in is voluntary / on-call coverage.
 /// </summary>
-[Authorize(Roles = Roles.Admin)]
+[Authorize(Roles = $"{Roles.Admin},{Roles.Operations}")]
 [Route("holidays")]
 public class HolidaysController : AppController
 {

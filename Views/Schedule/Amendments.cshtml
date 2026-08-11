@@ -5,6 +5,7 @@
 @model AttendanceMonitoring.ViewModels.ScheduleAmendmentsViewModel
 @{
     ViewData["Title"] = "Shift-change requests";
+    var isOperationsRequests = ViewBag.IsOperationsRequests is true;
 
     var pendingEdit = 0;
     var pendingLeave = 0;
@@ -55,6 +56,8 @@
 
 @await Html.PartialAsync("_RequestsTabs", ("shifts", pendingEdit, pendingLeave, pendingShift, pendingQuota))
 
+@if (!isOperationsRequests)
+{
 <section class="card">
     <div class="card-header">
         <h2>Shift changes &mdash; pending review</h2>
@@ -226,13 +229,14 @@
         </script>
     }
 </section>
+}
 
 @if (Model.Recent.Count > 0)
 {
     <section class="card">
         <div class="card-header">
-            <h2>Recent decisions</h2>
-            <small class="muted">Last @Model.Recent.Count item@(Model.Recent.Count == 1 ? "" : "s")</small>
+            <h2>@(isOperationsRequests ? "PM-approved shift changes" : "Recent decisions")</h2>
+            <small class="muted">@(isOperationsRequests ? "Read-only Operations view." : $"Last {Model.Recent.Count} item{(Model.Recent.Count == 1 ? "" : "s")}")</small>
         </div>
         <div class="table-wrap">
             <table class="data-table">

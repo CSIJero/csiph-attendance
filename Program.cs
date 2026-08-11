@@ -151,6 +151,11 @@ builder.Services.AddAuthorization(options =>
         AttendanceMonitoring.Models.Roles.Admin,
         AttendanceMonitoring.Models.Roles.ProgramManager,
         AttendanceMonitoring.Models.Roles.Pm));
+    options.AddPolicy("AdminOrOperations", policy => policy.RequireRole(
+        AttendanceMonitoring.Models.Roles.Admin,
+        AttendanceMonitoring.Models.Roles.ProgramManager,
+        AttendanceMonitoring.Models.Roles.Pm,
+        AttendanceMonitoring.Models.Roles.Operations));
 });
 
 builder.Services.AddRateLimiter(options =>

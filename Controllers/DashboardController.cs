@@ -28,7 +28,9 @@ public class DashboardController : AppController
         var me = await GetCurrentUserAsync();
         if (me is null) return Challenge();
 
-        return IsAdmin ? await AdminViewAsync(me) : await EmployeeViewAsync(me);
+        return IsAdmin || IsOperations
+            ? await AdminViewAsync(me)
+            : await EmployeeViewAsync(me);
     }
 
     // ------------------------------------------------------------------
@@ -48,6 +50,8 @@ public class DashboardController : AppController
         [FromForm] string? kind,
         [FromForm] string? reason)
     {
+        if (IsOperations) return Forbid();
+
         var me = await GetCurrentUserAsync();
         if (me is null) return Challenge();
 

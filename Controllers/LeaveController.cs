@@ -21,17 +21,19 @@ public class LeaveController : AppController
     // plus recent decisions, scoped to their visible Business Unit.
     // ------------------------------------------------------------------
     [HttpGet("")]
-    public async Task<IActionResult> Index()
+    public async Task<IActionResult> Index([FromQuery] string? bu = null)
     {
         var meId = CurrentUserId;
         if (meId is null) return Unauthorized();
 
-        var mine = await Db.LeaveRequests
-            .Where(r => r.UserId == meId)
-            .Include(r => r.DecidedByUser)
-            .OrderByDescending(r => r.RequestedAt)
-            .Take(50)
-            .ToListAsync();
+        var mine = IsOperations
+            ? new List<LeaveRequest>()
+            : await Db.LeaveRequests
+                .Where(r => r.UserId == meId)
+                .Include(r => r.DecidedByUser)
+                .OrderByDescending(r => r.RequestedAt)
+                .Take(50)
+                .ToListAsync();
 
         // Pull the current user once so the embedded "Request a shift
         // change" form (folded in from the Schedule page) knows whether
@@ -41,11 +43,11 @@ public class LeaveController : AppController
         var vm = new LeaveIndexViewModel
         {
             Mine = mine,
-            ViewerIsAdmin = IsAdmin,
-            Me = me,
+            ViewerIsAdmin = IsAdmin || IsOperations,
+            Me = IsOperations ? null : me,
         };
 
-        if (me is not null)
+        if (me is not null && !IsOperations)
         {
             var pendingAmends = await Db.ScheduleAmendments
                 .Where(a => a.UserId == me.Id && a.Status == "Pending")
@@ -71,8 +73,35 @@ public class LeaveController : AppController
             vm.CanRequestShiftChange = !isAdminRole && !me.IsSupport;
         }
 
-        if (IsAdmin)
+        if (IsAdmin || IsOperations)
         {
+            var businessUnitFilter = RuntimeConfig.NormaliseBusinessUnit(bu);
+            ViewBag.IsOperationsRequests = IsOperations;
+            ViewBag.BusinessUnitFilter = businessUnitFilter;
+            ViewBag.BusinessUnits = RuntimeConfig.GetBusinessUnits();
+
+            if (IsOperations)
+            {
+                var approved = Db.LeaveRequests
+                    .Include(r => r.User)
+                    .Include(r => r.RequestedByUser)
+                    .Include(r => r.DecidedByUser)
+                    .Where(r => r.Status == "Approved"
+                                && r.DecidedByUser != null
+                                && r.DecidedByUser.Role == Roles.Pm);
+                if (!string.IsNullOrWhiteSpace(businessUnitFilter))
+                {
+                    approved = approved.Where(r =>
+                        r.User != null && r.User.BusinessUnit == businessUnitFilter);
+                }
+
+                vm.Recent = await approved
+                    .OrderByDescending(r => r.DecidedAt)
+                    .Take(100)
+                    .ToListAsync();
+                return View(vm);
+            }
+
             // Restrict the admin / PM queue to users they're allowed to see
             // (admins: everyone; PMs: their own Business Unit).
             var visibleIds = await (await GetVisibleUsersAsync(includeAdmins: IsPureAdmin))
@@ -104,6 +133,8 @@ public class LeaveController : AppController
     [HttpGet("request")]
     public new async Task<IActionResult> Request()
     {
+        if (IsOperations) return Forbid();
+
         var vm = await BuildFormVmAsync();
         return View("Request", vm);
     }
@@ -118,6 +149,8 @@ public class LeaveController : AppController
         [FromForm(Name = "reason")] string? reasonRaw,
         [FromForm(Name = "proof_photo")] string? proofPhoto)
     {
+        if (IsOperations) return Forbid();
+
         var meId = CurrentUserId;
         if (meId is null) return Unauthorized();
 
@@ -342,6 +375,8 @@ public class LeaveController : AppController
     [HttpPost("{id:int}/cancel"), ValidateAntiForgeryToken]
     public async Task<IActionResult> Cancel(int id)
     {
+        if (IsOperations) return Forbid();
+
         var meId = CurrentUserId;
         if (meId is null) return Unauthorized();
 

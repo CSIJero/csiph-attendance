@@ -290,6 +290,7 @@ public class QuotaResetIndexViewModel
 public class ViolationsIndexViewModel
 {
     public List<NotificationLog> Rows { get; set; } = new();
+    public bool IsReadOnly { get; set; }
     /// <summary>"pending" (default), "investigate", "needaction", "closed", or "all".</summary>
     public string Filter { get; set; } = "pending";
     public int PendingCount { get; set; }

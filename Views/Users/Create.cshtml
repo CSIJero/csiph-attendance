@@ -178,7 +178,8 @@
                 var roleChoices = Model.RoleLabelChoices
                     .Where(d => isPureAdmin
                         || (d.BaseRole != AttendanceMonitoring.Models.Roles.Admin
-                         && d.BaseRole != AttendanceMonitoring.Models.Roles.ProgramManager))
+                         && d.BaseRole != AttendanceMonitoring.Models.Roles.ProgramManager
+                         && d.BaseRole != AttendanceMonitoring.Models.Roles.Operations))
                     .ToList();
                 // Pre-select: if the form was repopulated after a failed
                 // submit, honour the picked label; otherwise default to

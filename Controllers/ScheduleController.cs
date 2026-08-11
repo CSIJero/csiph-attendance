@@ -1010,6 +1010,8 @@ public class ScheduleController : AppController
         [FromForm(Name = "proof_photo")] string? proofPhoto,
         [FromQuery(Name = "user_id")] int? userId)
     {
+        if (IsOperations) return Forbid();
+
         var me = await GetCurrentUserAsync();
         if (me is null) return Challenge();
 
@@ -1112,11 +1114,40 @@ public class ScheduleController : AppController
     /// users the viewer can see (BU for PMs, everyone for pure admins).
     /// </summary>
     [HttpGet("amendments")]
-    public async Task<IActionResult> Amendments()
+    public async Task<IActionResult> Amendments([FromQuery] string? bu = null)
     {
         var me = await GetCurrentUserAsync();
         if (me is null) return Challenge();
-        if (!IsAdmin) return Forbid();
+        if (!IsAdmin && !IsOperations) return Forbid();
+
+        var businessUnitFilter = RuntimeConfig.NormaliseBusinessUnit(bu);
+        ViewBag.IsOperationsRequests = IsOperations;
+        ViewBag.BusinessUnitFilter = businessUnitFilter;
+        ViewBag.BusinessUnits = RuntimeConfig.GetBusinessUnits();
+
+        if (IsOperations)
+        {
+            var approved = Db.ScheduleAmendments
+                .Include(a => a.User)
+                .Include(a => a.RequestedByUser)
+                .Include(a => a.DecidedByUser)
+                .Where(a => a.Status == "Approved"
+                            && a.DecidedByUser != null
+                            && a.DecidedByUser.Role == Roles.Pm);
+            if (!string.IsNullOrWhiteSpace(businessUnitFilter))
+            {
+                approved = approved.Where(a =>
+                    a.User != null && a.User.BusinessUnit == businessUnitFilter);
+            }
+
+            return View(new ScheduleAmendmentsViewModel
+            {
+                Recent = await approved
+                    .OrderByDescending(a => a.DecidedAt)
+                    .Take(100)
+                    .ToListAsync(),
+            });
+        }
 
         var visibleIds = await (await GetVisibleUsersAsync(includeAdmins: IsPureAdmin))
             .Select(u => u.Id)
@@ -1323,6 +1354,8 @@ public class ScheduleController : AppController
     [ValidateAntiForgeryToken]
     public async Task<IActionResult> CancelAmendment(int id)
     {
+        if (IsOperations) return Forbid();
+
         var me = await GetCurrentUserAsync();
         if (me is null) return Challenge();
 

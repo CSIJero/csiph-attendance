@@ -5,6 +5,7 @@
 @model AttendanceMonitoring.ViewModels.LeaveIndexViewModel
 @{
     ViewData["Title"] = Model.ViewerIsAdmin ? "Requests" : "My Requests";
+    var isOperationsRequests = ViewBag.IsOperationsRequests is true;
     var viewer = ViewData["ViewerUser"] as User;
     var tz = (ViewData["TzLabel"] as string) ?? "PHT";
 
@@ -82,7 +83,7 @@
             </p>
         </div>
         <div>
-            @if (Model.ViewerIsAdmin || empTab == "leave")
+            @if (!isOperationsRequests && (Model.ViewerIsAdmin || empTab == "leave"))
             {
                 <a class="btn btn-primary" asp-controller="Leave" asp-action="Request">New leave request</a>
             }
@@ -297,6 +298,8 @@ else
 
 @if (Model.ViewerIsAdmin)
 {
+    @if (!isOperationsRequests)
+    {
     <section class="card">
         <div class="card-header">
             <h2>Pending review</h2>
@@ -465,11 +468,12 @@ else
             </script>
         }
     </section>
+    }
 
     <section class="card">
         <div class="card-header">
-            <h2>Recently decided</h2>
-            <small class="muted">Last 25 approved / rejected / cancelled.</small>
+            <h2>@(isOperationsRequests ? "PM-approved leave requests" : "Recently decided")</h2>
+            <small class="muted">@(isOperationsRequests ? "Read-only Operations view." : "Last 25 approved / rejected / cancelled.")</small>
         </div>
         @if (Model.Recent.Count == 0)
         {
@@ -517,7 +521,7 @@ else
     </section>
 }
 
-@if (Model.ViewerIsAdmin || empTab == "leave")
+@if (!isOperationsRequests && (Model.ViewerIsAdmin || empTab == "leave"))
 {
 <section class="card">
     <div class="card-header">

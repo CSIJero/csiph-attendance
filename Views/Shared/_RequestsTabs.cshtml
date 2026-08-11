@@ -14,47 +14,74 @@
 @model (string Active, int PendingEdit, int PendingLeave, int PendingShift, int PendingQuota)
 @{
     string Cls(string key) => Model.Active == key ? "subtab subtab-active" : "subtab";
+    var isOperationsRequests = ViewBag.IsOperationsRequests == true;
+    var businessUnitFilter = ViewBag.BusinessUnitFilter as string;
+    var businessUnits = ViewBag.BusinessUnits as IEnumerable<string>
+        ?? Enumerable.Empty<string>();
 }
 <nav class="subtabs" aria-label="Requests sub-navigation">
     <a class="@Cls("edits")"
        asp-controller="Attendance"
-       asp-action="EditRequests">
+       asp-action="EditRequests"
+       asp-route-bu="@businessUnitFilter">
         <span>Attendance edits</span>
-        @if (Model.PendingEdit > 0)
+        @if (!isOperationsRequests && Model.PendingEdit > 0)
         {
             <span class="subtab-badge" title="@Model.PendingEdit pending">@Model.PendingEdit</span>
         }
     </a>
     <a class="@Cls("leaves")"
        asp-controller="Leave"
-       asp-action="Index">
+       asp-action="Index"
+       asp-route-bu="@businessUnitFilter">
         <span>Leave of absence</span>
-        @if (Model.PendingLeave > 0)
+        @if (!isOperationsRequests && Model.PendingLeave > 0)
         {
             <span class="subtab-badge" title="@Model.PendingLeave pending">@Model.PendingLeave</span>
         }
     </a>
     <a class="@Cls("shifts")"
        asp-controller="Schedule"
-       asp-action="Amendments">
+       asp-action="Amendments"
+       asp-route-bu="@businessUnitFilter">
         <span>Shift changes</span>
-        @if (Model.PendingShift > 0)
+        @if (!isOperationsRequests && Model.PendingShift > 0)
         {
             <span class="subtab-badge" title="@Model.PendingShift pending">@Model.PendingShift</span>
         }
     </a>
     <a class="@Cls("quota")"
        asp-controller="QuotaReset"
-       asp-action="Index">
+       asp-action="Index"
+       asp-route-bu="@businessUnitFilter">
         <span>Break / lunch resets</span>
-        @if (Model.PendingQuota > 0)
+        @if (!isOperationsRequests && Model.PendingQuota > 0)
         {
             <span class="subtab-badge" title="@Model.PendingQuota pending">@Model.PendingQuota</span>
         }
     </a>
-    <a class="@Cls("addtime")"
-       asp-controller="Attendance"
-       asp-action="RequestMissingEntry">
-        <span>Add time entry</span>
-    </a>
+    @if (!isOperationsRequests)
+    {
+        <a class="@Cls("addtime")"
+           asp-controller="Attendance"
+           asp-action="RequestMissingEntry">
+            <span>Add time entry</span>
+        </a>
+    }
 </nav>
+@if (isOperationsRequests)
+{
+    <form method="get" class="form form-inline" style="margin:0 0 18px;">
+        <label>
+            <span class="field-label">Business Unit</span>
+            <select name="bu" onchange="this.form.submit()">
+                <option value="">All Business Units</option>
+                @foreach (var unit in businessUnits)
+                {
+                    <option value="@unit" selected="@(unit == businessUnitFilter)">@unit</option>
+                }
+            </select>
+        </label>
+        <span class="muted">Showing requests approved by Project Managers only.</span>
+    </form>
+}

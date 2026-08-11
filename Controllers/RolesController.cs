@@ -47,7 +47,7 @@ public class RolesController : AppController
     }
 
     /// <summary>
-    /// Stable ordering for the four canonical tiers so the seeded rows
+    /// Stable ordering for the five canonical tiers so the seeded rows
     /// always show in the same Admin → Employee top-to-bottom order.
     /// </summary>
     private static int BuiltInOrder(string baseRole) => baseRole switch
@@ -55,7 +55,8 @@ public class RolesController : AppController
         Models.Roles.Admin          => 0,
         Models.Roles.ProgramManager => 1,
         Models.Roles.Pm             => 2,
-        Models.Roles.Employee       => 3,
+        Models.Roles.Operations     => 3,
+        Models.Roles.Employee       => 4,
         _                           => 99,
     };
 
@@ -77,14 +78,15 @@ public class RolesController : AppController
 
         // BaseRole is required so every custom row maps to a known
         // permission tier. Normalise + validate against the canonical
-        // four (admin / program_manager / pm / employee).
+        // five (admin / program_manager / pm / operations / employee).
         var tier = Models.Roles.Normalise(baseRole);
         if (tier != Models.Roles.Admin
             && tier != Models.Roles.ProgramManager
             && tier != Models.Roles.Pm
+            && tier != Models.Roles.Operations
             && tier != Models.Roles.Employee)
         {
-            TempData.Flash("Pick a base permission tier (Administrator, Program Manager, Project Manager or Employee).", "danger");
+            TempData.Flash("Pick a base permission tier (Administrator, Program Manager, Project Manager, Operations or Employee).", "danger");
             return RedirectToAction(nameof(Index));
         }
 
@@ -125,7 +127,7 @@ public class RolesController : AppController
             return RedirectToAction(nameof(Index));
         }
 
-        // Built-in rows back the four canonical tiers — deleting one would
+        // Built-in rows back the five canonical tiers — deleting one would
         // leave the Role dropdown without a representative entry for that
         // tier. Hard-block server-side regardless of what the UI sent.
         if (def.IsBuiltIn)
@@ -145,4 +147,3 @@ public class RolesController : AppController
         return RedirectToAction(nameof(Index));
     }
 }
-
