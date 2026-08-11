@@ -148,11 +148,11 @@ public class DashboardController : AppController
 
         foreach (var u in users)
         {
-            var state = u.EffectiveState(_onlineThreshold);
+            todays.TryGetValue(u.Id, out var att);
+            var state = u.EffectiveDashboardState(att, _onlineThreshold);
             var isOnline = state != "offline";
             if (isOnline) online++;
             if (state == "lunch") lunch++;
-            todays.TryGetValue(u.Id, out var att);
             var activeWorkDate = att?.WorkDate ?? today;
             todaysSchedule.TryGetValue((u.Id, activeWorkDate), out var sched);
             var isHoliday = IsHolidayForUser(

@@ -309,6 +309,27 @@ public class User
         };
     }
 
+    /// <summary>
+    /// Computes dashboard presence while requiring an active clock-in and recent login.
+    /// Employees without an open attendance row, or whose login session is
+    /// older than the maximum session length, are displayed as offline.
+    /// </summary>
+    public string EffectiveDashboardState(
+        Attendance? attendance,
+        int thresholdSeconds = 60)
+    {
+        if (attendance is null || !attendance.IsOpen) return "offline";
+        if (LastLoginAt is null) return "offline";
+
+        var lastLoginUtc = DateTime.SpecifyKind(LastLoginAt.Value, DateTimeKind.Utc);
+        if (DateTime.UtcNow > lastLoginUtc.AddHours(Constants.MaximumOnlineLoginHours))
+        {
+            return "offline";
+        }
+
+        return EffectiveState(thresholdSeconds);
+    }
+
     /// <summary>True when lunch was started within the past
     /// <see cref="Constants.LunchBreakMinutes"/> minutes.</summary>
     public bool IsLunchActive()

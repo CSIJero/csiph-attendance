@@ -17,6 +17,9 @@ public static class Constants
     /// <summary>How many seconds since last heartbeat counts as "online".</summary>
     public const int DefaultOnlineThresholdSeconds = 60;
 
+    /// <summary>Maximum age of a login session that can still appear online.</summary>
+    public const int MaximumOnlineLoginHours = 8;
+
     /// <summary>Lunch breaks auto-expire after this many minutes.</summary>
     public const int LunchBreakMinutes = 60;
 

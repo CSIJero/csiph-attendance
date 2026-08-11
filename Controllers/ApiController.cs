@@ -411,10 +411,21 @@ public class ApiController : ControllerBase
     {
         var users = await VisibleUsersAsync();
         var today = PhTime.Today;
+        var yesterday = today.AddDays(-1);
         var userIds = users.Select(u => u.Id).ToList();
-        var todays = await _db.Attendances
-            .Where(a => a.WorkDate == today && userIds.Contains(a.UserId))
-            .ToDictionaryAsync(a => a.UserId);
+        var attendanceRows = await _db.Attendances
+            .Where(a => userIds.Contains(a.UserId)
+                        && (a.WorkDate == today
+                            || (a.WorkDate == yesterday && a.CheckOut == null)))
+            .OrderByDescending(a => a.CheckIn)
+            .ToListAsync();
+        var todays = attendanceRows
+            .GroupBy(a => a.UserId)
+            .ToDictionary(
+                g => g.Key,
+                g => g.OrderByDescending(a => a.IsOpen)
+                      .ThenByDescending(a => a.CheckIn)
+                      .First());
         var todaysSchedule = await _db.ScheduleEntries
             .Where(s => s.WorkDate == today && userIds.Contains(s.UserId))
             .ToDictionaryAsync(s => s.UserId);
@@ -432,7 +443,7 @@ public class ApiController : ControllerBase
         {
             todays.TryGetValue(u.Id, out var att);
             todaysSchedule.TryGetValue(u.Id, out var sched);
-            var state = u.EffectiveState(_onlineThreshold);
+            var state = u.EffectiveDashboardState(att, _onlineThreshold);
             var isOnline = state != "offline";
             var isHoliday = todayHolidayRows.Any(h => h.Country == HolidayHelper.CountryFor(u) || h.Country == "ALL");
             var todayWorkType = isHoliday ? "Holiday" : sched?.EffectiveWorkType;
