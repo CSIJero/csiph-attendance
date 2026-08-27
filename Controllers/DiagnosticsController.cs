@@ -51,6 +51,7 @@ public class DiagnosticsController : AppController
             $"Password     = {Mask(o.Password)}",
             $"FromAddress  = {(string.IsNullOrEmpty(o.FromAddress) ? "(blank)" : o.FromAddress)}",
             $"FromName     = {o.FromName}",
+            $"SendTimeout  = {o.SendTimeoutSeconds}s",
         };
         return Content(string.Join("\n", lines), "text/plain");
     }
@@ -66,6 +67,11 @@ public class DiagnosticsController : AppController
         if (string.IsNullOrWhiteSpace(to))
         {
             return Content("Missing ?to= query parameter.", "text/plain");
+        }
+
+        if (!_emailOptions.CurrentValue.Enabled)
+        {
+            return Content("Email delivery is disabled; no message was sent.", "text/plain");
         }
 
         var subject = "Attendance Monitoring — test email";

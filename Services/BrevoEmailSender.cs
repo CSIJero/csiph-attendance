@@ -62,7 +62,7 @@ public class BrevoEmailSender : IEmailSender
 
         var opts = _options.CurrentValue;
 
-        if (!opts.Enabled || string.IsNullOrWhiteSpace(opts.FromAddress))
+        if (!opts.Enabled)
         {
             _log.LogInformation(
                 "[Email DISABLED] subject='{Subject}' to=[{To}]\n{Body}",
@@ -70,13 +70,18 @@ public class BrevoEmailSender : IEmailSender
             return;
         }
 
+
+        if (string.IsNullOrWhiteSpace(opts.FromAddress))
+        {
+            throw new InvalidOperationException(
+                "Brevo email is enabled but Email:FromAddress is blank.");
+        }
+
         if (string.IsNullOrWhiteSpace(opts.Password))
         {
-            _log.LogWarning(
-                "Brevo provider selected but Email:Password (API key) is blank "
-                + "— check Render env var Email__Password. Message NOT sent. "
-                + "subject='{Subject}'", subject);
-            return;
+            throw new InvalidOperationException(
+                "Brevo email is enabled but Email:Password (API key) is blank. "
+                + "Check Email__Password.");
         }
 
         // Brevo's JSON shape — kept anonymous because each call builds it

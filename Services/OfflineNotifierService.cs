@@ -626,6 +626,12 @@ public class OfflineNotifierService : BackgroundService
             return;
         }
 
+        if (!_emailOptions.CurrentValue.Enabled)
+        {
+            await RecordAsync(db, level, "Disabled", u, recipients, subject, minutes, null, ct);
+            return;
+        }
+
         try
         {
             await email.SendAsync(recipients, subject, body, ct);

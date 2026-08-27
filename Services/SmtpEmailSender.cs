@@ -52,29 +52,20 @@ public class SmtpEmailSender : IEmailSender
 
         var opts = _options.CurrentValue;
 
-        if (!opts.Enabled
-            || string.IsNullOrWhiteSpace(opts.Host)
+        if (!opts.Enabled)
+        {
+            _log.LogInformation(
+                "[Email DISABLED] subject='{Subject}' to=[{To}]\n{Body}",
+                subject, string.Join(", ", recipients), body);
+            return;
+        }
+
+
+        if (string.IsNullOrWhiteSpace(opts.Host)
             || string.IsNullOrWhiteSpace(opts.FromAddress))
         {
-            // When the operator *meant* to enable email but the credentials
-            // aren't filled in, raise the log level so it's obvious why no
-            // mail is going out — otherwise this looks identical to the
-            // "intentionally disabled" case.
-            if (opts.Enabled
-                && (string.IsNullOrWhiteSpace(opts.FromAddress)
-                    || string.IsNullOrWhiteSpace(opts.Host)))
-            {
-                _log.LogWarning(
-                    "Email is Enabled=true but Host/FromAddress is blank in appsettings.json — alert NOT sent. subject='{Subject}' to=[{To}]",
-                    subject, string.Join(", ", recipients));
-            }
-            else
-            {
-                _log.LogInformation(
-                    "[Email DISABLED] subject='{Subject}' to=[{To}]\n{Body}",
-                    subject, string.Join(", ", recipients), body);
-            }
-            return;
+            throw new InvalidOperationException(
+                "Email is enabled but Email:Host or Email:FromAddress is blank.");
         }
 
         // SMTP relays (Brevo, SendGrid, Office 365, Gmail, ...) reject
@@ -86,12 +77,9 @@ public class SmtpEmailSender : IEmailSender
         if (string.IsNullOrWhiteSpace(opts.Username)
             || string.IsNullOrWhiteSpace(opts.Password))
         {
-            _log.LogWarning(
-                "Email is Enabled=true but Email:Username / Email:Password are blank "
-                + "(check Render env vars Email__Username / Email__Password). "
-                + "Message NOT sent. subject='{Subject}' to=[{To}]",
-                subject, string.Join(", ", recipients));
-            return;
+            throw new InvalidOperationException(
+                "Email is enabled but Email:Username or Email:Password is blank. "
+                + "Check Email__Username and Email__Password.");
         }
 
         var msg = new MimeMessage();

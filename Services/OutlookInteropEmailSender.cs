@@ -85,7 +85,33 @@ public class OutlookInteropEmailSender : IEmailSender
         thread.SetApartmentState(ApartmentState.STA);
         thread.Start();
 
-        return tcs.Task;
+        return WaitForSendAsync(tcs.Task, subject, recipients, ct);
+    }
+
+    private async Task WaitForSendAsync(
+        Task sendTask,
+        string subject,
+        List<string> recipients,
+        CancellationToken ct)
+    {
+        var timeoutSeconds = Math.Max(1, _options.CurrentValue.SendTimeoutSeconds);
+        try
+        {
+            await sendTask.WaitAsync(TimeSpan.FromSeconds(timeoutSeconds), ct);
+        }
+        catch (TimeoutException ex)
+        {
+            _log.LogError(
+                ex,
+                "Outlook send timed out after {TimeoutSeconds}s. subject='{Subject}' to=[{To}]",
+                timeoutSeconds,
+                subject,
+                string.Join(", ", recipients));
+            throw new TimeoutException(
+                $"Outlook did not accept the message within {timeoutSeconds} seconds. " +
+                "Check for an Outlook security prompt, account sign-in issue, or a blocked Outbox.",
+                ex);
+        }
     }
 
     private void SendCore(List<string> recipients, string subject, string body)

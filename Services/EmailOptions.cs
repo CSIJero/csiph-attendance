@@ -25,6 +25,9 @@ public class EmailOptions
 
     public string FromAddress { get; set; } = string.Empty;
     public string FromName { get; set; } = "Attendance Monitoring";
+
+    /// <summary>Maximum time to wait for a provider to accept a message.</summary>
+    public int SendTimeoutSeconds { get; set; } = 30;
 }
 
 /// <summary>Settings for the offline-during-shift notifier.</summary>
