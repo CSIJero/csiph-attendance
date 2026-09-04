@@ -38,6 +38,7 @@ public class OfflineNotifierService : BackgroundService
     private readonly ILogger<OfflineNotifierService> _log;
     private readonly IOptionsMonitor<NotifierOptions> _options;
     private readonly IOptionsMonitor<EmailOptions> _emailOptions;
+    private readonly TimeSpan _onlineThreshold;
 
     private readonly ConcurrentDictionary<int, ShiftAlertState> _alertedSessions = new();
     private readonly ConcurrentDictionary<string, DateTime> _recentNotifications = new();
@@ -46,12 +47,18 @@ public class OfflineNotifierService : BackgroundService
         IServiceProvider services,
         ILogger<OfflineNotifierService> log,
         IOptionsMonitor<NotifierOptions> options,
-        IOptionsMonitor<EmailOptions> emailOptions)
+        IOptionsMonitor<EmailOptions> emailOptions,
+        IConfiguration configuration)
     {
         _services = services;
         _log = log;
         _options = options;
         _emailOptions = emailOptions;
+        _onlineThreshold = TimeSpan.FromSeconds(Math.Max(
+            1,
+            configuration.GetValue(
+                "AttendanceMonitoring:OnlineThresholdSeconds",
+                Constants.DefaultOnlineThresholdSeconds)));
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -305,19 +312,56 @@ public class OfflineNotifierService : BackgroundService
                 }
             }
 
-            if (!string.Equals(u.PresenceState, "offline", StringComparison.OrdinalIgnoreCase)) continue;
-            if (u.OfflineSince is null) continue;
+            // Explicit browser events (lock, logout, tab close) stamp
+            // OfflineSince. A real connectivity loss cannot call /api/offline,
+            // so also treat a stale heartbeat as offline after the configured
+            // online threshold. Without this fallback, network outages never
+            // reach the reminder pipeline.
+            var isExplicitlyOffline = string.Equals(
+                u.PresenceState,
+                "offline",
+                StringComparison.OrdinalIgnoreCase);
+            var lastSeenUtc = u.LastSeen is { } seen
+                ? DateTime.SpecifyKind(seen, DateTimeKind.Utc)
+                : (DateTime?)null;
 
-            var offlineSinceUtc = DateTime.SpecifyKind(u.OfflineSince.Value, DateTimeKind.Utc);
+            DateTime? effectiveOfflineSinceUtc;
+            if (isExplicitlyOffline)
+            {
+                if (u.OfflineSince is { } explicitSince)
+                {
+                    effectiveOfflineSinceUtc = DateTime.SpecifyKind(
+                        explicitSince,
+                        DateTimeKind.Utc);
+                }
+                else
+                {
+                    // Legacy rows created before OfflineSince was introduced
+                    // can already be marked offline without an anchor. Persist
+                    // one now so subsequent scans can reach the warning limit.
+                    effectiveOfflineSinceUtc = lastSeenUtc ?? nowUtc;
+                    u.OfflineSince = effectiveOfflineSinceUtc;
+                    await db.SaveChangesAsync(ct);
+                }
+            }
+            else
+            {
+                effectiveOfflineSinceUtc = lastSeenUtc is { } lastSeen
+                    && nowUtc - lastSeen >= _onlineThreshold
+                        ? lastSeen.Add(_onlineThreshold)
+                        : null;
+            }
+
+            if (effectiveOfflineSinceUtc is null) continue;
+
+            var offlineSinceUtc = effectiveOfflineSinceUtc.Value;
             var offlineFor = nowUtc - offlineSinceUtc;
             if (offlineFor < warnAfter) continue;
 
             if (string.Equals(u.PresenceState, "lunch", StringComparison.OrdinalIgnoreCase) && u.IsLunchActive()) continue;
             if (string.Equals(u.PresenceState, "break", StringComparison.OrdinalIgnoreCase) && u.IsBreakActive()) continue;
 
-            var lastUtc = u.LastSeen is { } ls
-                ? DateTime.SpecifyKind(ls, DateTimeKind.Utc)
-                : offlineSinceUtc;
+            var lastUtc = lastSeenUtc ?? offlineSinceUtc;
 
             AlertLevel toSend;
             if (state.DeductionSent)
