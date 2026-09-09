@@ -370,10 +370,13 @@
             const isOffline = (u.state || "offline") === "offline";
             const reason = String(u.presence_reason || "unknown")
                 .replaceAll("_", " ");
-            const logoutAt = u.presence_reason === "logout" && u.logout_at
-                ? ` ${fmtTime(u.logout_at)}`
-                : "";
-            presenceReason.textContent = `${reason}${logoutAt}`;
+            const reasonAt = u.presence_reason === "logout"
+                ? u.logout_at
+                : ["locked", "browser_closed"].includes(u.presence_reason)
+                    ? u.offline_since
+                    : null;
+            const timestamp = reasonAt ? ` ${fmtTime(reasonAt)}` : "";
+            presenceReason.textContent = `${reason}${timestamp}`;
             presenceReason.hidden = !isOffline;
         }
         if (workTypeFlag) {

@@ -345,6 +345,11 @@
                                 {
                                     <text>@UserClock.Format(viewer, logoutAt, "yyyy-MM-dd HH:mm") @tz</text>
                                 }
+                                else if (row.User.PresenceReason is "locked" or "browser_closed"
+                                         && row.User.OfflineSince is { } offlineSince)
+                                {
+                                    <text>@UserClock.Format(viewer, offlineSince, "yyyy-MM-dd HH:mm") @tz</text>
+                                }
                             </small>
                         </td>
                         <td>

@@ -483,6 +483,7 @@ public class ApiController : ControllerBase
                 state,
                 presence_reason = u.PresenceReason,
                 logout_at = u.LogoutAt?.ToString("o"),
+                offline_since = u.OfflineSince?.ToString("o"),
                 last_seen = u.EffectiveLastSeen.ToString("o"),
                 offline_seconds_today = PresenceTracker.OfflineSecondsForDate(
                     u,
