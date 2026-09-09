@@ -797,7 +797,7 @@
     // Online are:
     //   - User starts Lunch  → "lunch"
     //   - Windows locks      → "offline" (HTTPS only, via IdleDetector)
-    //   - Heartbeat stops    → "offline" (server-side, after threshold)
+    //   - Tab/browser closes → "offline" (best-effort beacon)
 
     // Keep the user marked Online whenever the tab is alive. Lunch and
     // explicit offline (lock-screen) are user/OS-controlled and untouched.
