@@ -40,6 +40,7 @@ public static class DbInitializer
         await EnsurePasswordResetColumnsAsync(db);
         await EnsureReminderOptOutColumnAsync(db);
         await EnsureOfflineSinceColumnAsync(db);
+        await EnsurePresenceTrackingSchemaAsync(db);
         await EnsureShortBreakColumnsAsync(db);
         await EnsureLunchQuotaColumnsAsync(db);
         await EnsureManagerColumnAsync(db);
@@ -547,6 +548,91 @@ public static class DbInitializer
             await db.Database.ExecuteSqlRawAsync(
                 "ALTER TABLE users ADD COLUMN OfflineSince TEXT NULL;");
         }
+    }
+
+    private static async Task EnsurePresenceTrackingSchemaAsync(AppDbContext db)
+    {
+        if (db.Database.IsNpgsql())
+        {
+            await db.Database.ExecuteSqlRawAsync(
+                "ALTER TABLE users ADD COLUMN IF NOT EXISTS \"PresenceReason\" VARCHAR(32) NOT NULL DEFAULT 'never_seen';");
+            await db.Database.ExecuteSqlRawAsync(
+                "ALTER TABLE users ADD COLUMN IF NOT EXISTS \"LogoutAt\" TIMESTAMP NULL;");
+            await db.Database.ExecuteSqlRawAsync(@"
+                CREATE TABLE IF NOT EXISTS presence_intervals (
+                    ""Id""        SERIAL PRIMARY KEY,
+                    ""UserId""    INTEGER NOT NULL REFERENCES users(""Id"") ON DELETE CASCADE,
+                    ""StartedAt"" TIMESTAMP NOT NULL,
+                    ""EndedAt""   TIMESTAMP NULL,
+                    ""Reason""    VARCHAR(32) NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS IX_presence_intervals_UserId
+                    ON presence_intervals(""UserId"");
+                CREATE INDEX IF NOT EXISTS IX_presence_intervals_StartedAt
+                    ON presence_intervals(""StartedAt"");
+                CREATE INDEX IF NOT EXISTS IX_presence_intervals_EndedAt
+                    ON presence_intervals(""EndedAt"");");
+            await db.Database.ExecuteSqlRawAsync(@"
+                UPDATE presence_intervals p
+                SET ""EndedAt"" = p.""StartedAt""
+                WHERE p.""EndedAt"" IS NULL
+                  AND p.""Id"" NOT IN (
+                      SELECT MIN(""Id"")
+                      FROM presence_intervals
+                      WHERE ""EndedAt"" IS NULL
+                      GROUP BY ""UserId""
+                  );
+                CREATE UNIQUE INDEX IF NOT EXISTS ""UX_presence_intervals_OpenUser""
+                    ON presence_intervals(""UserId"")
+                    WHERE ""EndedAt"" IS NULL;");
+            await db.Database.ExecuteSqlRawAsync(
+                "UPDATE users SET \"LastSeen\" = COALESCE(\"LastSeen\", \"LastLoginAt\", \"CreatedAt\") WHERE \"LastSeen\" IS NULL;");
+            return;
+        }
+
+        if (!db.Database.IsSqlite()) return;
+        var columns = await GetColumnsAsync(db, "users");
+        if (!columns.Contains("PresenceReason"))
+        {
+            await db.Database.ExecuteSqlRawAsync(
+                "ALTER TABLE users ADD COLUMN PresenceReason TEXT NOT NULL DEFAULT 'never_seen';");
+        }
+        if (!columns.Contains("LogoutAt"))
+        {
+            await db.Database.ExecuteSqlRawAsync(
+                "ALTER TABLE users ADD COLUMN LogoutAt TEXT NULL;");
+        }
+        if (!await TableExistsAsync(db, "presence_intervals"))
+        {
+            await db.Database.ExecuteSqlRawAsync(@"
+                CREATE TABLE presence_intervals (
+                    Id        INTEGER NOT NULL CONSTRAINT PK_presence_intervals PRIMARY KEY AUTOINCREMENT,
+                    UserId    INTEGER NOT NULL,
+                    StartedAt TEXT NOT NULL,
+                    EndedAt   TEXT NULL,
+                    Reason    TEXT NOT NULL,
+                    CONSTRAINT FK_presence_intervals_users_UserId
+                        FOREIGN KEY (UserId) REFERENCES users(Id) ON DELETE CASCADE
+                );
+                CREATE INDEX IX_presence_intervals_UserId ON presence_intervals(UserId);
+                CREATE INDEX IX_presence_intervals_StartedAt ON presence_intervals(StartedAt);
+                CREATE INDEX IX_presence_intervals_EndedAt ON presence_intervals(EndedAt);");
+        }
+        await db.Database.ExecuteSqlRawAsync(@"
+            UPDATE presence_intervals
+            SET EndedAt = StartedAt
+            WHERE EndedAt IS NULL
+              AND Id NOT IN (
+                  SELECT MIN(Id)
+                  FROM presence_intervals
+                  WHERE EndedAt IS NULL
+                  GROUP BY UserId
+              );
+            CREATE UNIQUE INDEX IF NOT EXISTS UX_presence_intervals_OpenUser
+                ON presence_intervals(UserId)
+                WHERE EndedAt IS NULL;");
+        await db.Database.ExecuteSqlRawAsync(
+            "UPDATE users SET LastSeen = COALESCE(LastSeen, LastLoginAt, CreatedAt) WHERE LastSeen IS NULL;");
     }
 
     /// <summary>

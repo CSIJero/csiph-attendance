@@ -9,6 +9,7 @@
 @functions {
     static string FormatOfflineFor(TimeSpan span)
     {
+        if (span.TotalSeconds <= 0) return "0 m";
         if (span.TotalMinutes < 1) return "< 1 m";
         if (span.TotalHours < 1) return $"{(int)span.TotalMinutes} m";
         var h = (int)span.TotalHours;
@@ -333,8 +334,18 @@
                         <td>
                             <span class="dot dot-@row.State"
                                   data-cell="dot"
-                                  title="@stateLabel"></span>
+                                  title="@row.User.PresenceReason"></span>
                             <span data-cell="status-text">@stateLabel</span>
+                            <small class="muted"
+                                   data-cell="presence-reason"
+                                   hidden="@(row.State != "offline")">
+                                @row.User.PresenceReason.Replace('_', ' ')
+                                @if (row.User.PresenceReason == "logout"
+                                     && row.User.LogoutAt is { } logoutAt)
+                                {
+                                    <text>@UserClock.Format(viewer, logoutAt, "yyyy-MM-dd HH:mm") @tz</text>
+                                }
+                            </small>
                         </td>
                         <td>
                             <a href="#"
@@ -423,31 +434,13 @@
                             }
                         </td>
                         <td data-cell="last-seen">
-                            @if (row.User.LastSeen is not null)
-                            {
-                                @($"{UserClock.Format(viewer, row.User.LastSeen, "yyyy-MM-dd HH:mm")} {tz}")
-                            }
-                            else
-                            {
-                                <span class="muted">never</span>
-                            }
+                            @($"{UserClock.Format(viewer, row.User.EffectiveLastSeen, "yyyy-MM-dd HH:mm")} {tz}")
                         </td>
-                        <td data-cell="offline-for" data-offline-minutes="@(row.Online ? -1 : (row.User.LastSeen is { } ls ? (int)Math.Max(0, (DateTime.UtcNow - DateTime.SpecifyKind(ls, DateTimeKind.Utc)).TotalMinutes) : -2))">
-                            @if (row.Online)
-                            {
-                                <span class="muted">&mdash;</span>
-                            }
-                            else if (row.User.LastSeen is { } off)
-                            {
-                                var offUtc = DateTime.SpecifyKind(off, DateTimeKind.Utc);
-                                var span = DateTime.UtcNow - offUtc;
-                                if (span < TimeSpan.Zero) span = TimeSpan.Zero;
-                                @FormatOfflineFor(span)
-                            }
-                            else
-                            {
-                                <span class="muted">never</span>
-                            }
+                        <td data-cell="offline-for"
+                            data-offline-seconds="@row.OfflineSecondsToday"
+                            data-offline-accruing="@(row.State == "offline" && row.Attendance?.IsOpen == true ? "1" : "0")"
+                            class="@(row.OfflineSecondsToday > 3600 ? "offline-over-limit" : "")">
+                            @FormatOfflineFor(TimeSpan.FromSeconds(row.OfflineSecondsToday))
                         </td>
                         <td data-cell="unit">
                             @if (!string.IsNullOrEmpty(row.User.LastLoginLocation)

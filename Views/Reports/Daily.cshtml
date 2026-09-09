@@ -81,9 +81,9 @@
     <div class="card-header">
         <h2>Rows</h2>
         <small class="muted">
-            Email Notifications counts the offline-during-shift alerts sent
-            for that day. Click the count to view 30-minute and over-60-minute
-            offline timestamps. Remarks is an export-only column.
+            Offline Time is the cumulative time recorded across all offline
+            intervals that day. Totals above one hour are highlighted for
+            deduction review. Remarks is an export-only column.
         </small>
     </div>
     <div class="table-wrap">
@@ -101,6 +101,7 @@
                     <th>Attendance Status</th>
                     <th>Late</th>
                     <th>Email Notifications</th>
+                    <th>Offline Time</th>
                     <th>Time Difference</th>
                 </tr>
             </thead>
@@ -108,7 +109,7 @@
                 @if (Model.Rows.Count == 0)
                 {
                     <tr>
-                        <td colspan="11" class="muted">
+                        <td colspan="13" class="muted">
                             No rows for the selected filters.
                         </td>
                     </tr>
@@ -193,6 +194,9 @@
                                     </button>
                                 }
                                 else { <span class="muted">&mdash;</span> }
+                            </td>
+                            <td class="@(row.OfflineSeconds > 3600 ? "offline-over-limit" : "")">
+                                @PhTime.FormatDurationMinutes(row.OfflineSeconds / 60)
                             </td>
                             <td>
                                 @{

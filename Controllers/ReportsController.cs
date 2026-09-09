@@ -62,7 +62,8 @@ public class ReportsController : AppController
         {
             "Date", "Key", "Employee Name", "Employee ID", "Business Unit",
             "Start Time", "End Time", "Hours Rendered",
-            "Attendance Status", "Late", "Email Notifications", "Time Difference", "Remarks",
+            "Attendance Status", "Late", "Email Notifications", "Offline Time",
+            "Time Difference", "Remarks",
         };
         for (var i = 0; i < headers.Length; i++)
         {
@@ -98,8 +99,10 @@ public class ReportsController : AppController
             ws.Cell(r, 9).Value = row.AttendanceStatus;
             ws.Cell(r, 10).Value = row.LateStatus;
             ws.Cell(r, 11).Value = row.EmailNotifications; // always write, including 0
-            ws.Cell(r, 12).Value = Math.Round(row.TimeDifference, 2);
-            ws.Cell(r, 13).Value = row.Remarks ?? string.Empty;
+            ws.Cell(r, 12).Value = PhTime.FormatDurationMinutes(
+                row.OfflineSeconds / 60);
+            ws.Cell(r, 13).Value = Math.Round(row.TimeDifference, 2);
+            ws.Cell(r, 14).Value = row.Remarks ?? string.Empty;
 
             // Highlight incomplete rows the same way the source sheet does.
             if (string.Equals(row.AttendanceStatus, "Incomplete", StringComparison.OrdinalIgnoreCase)
@@ -141,6 +144,13 @@ public class ReportsController : AppController
                 ws.Cell(r, 11).Style.Font.Bold = true;
             }
 
+            if (row.OfflineSeconds > 3600)
+            {
+                ws.Cell(r, 12).Style.Fill.BackgroundColor =
+                    XLColor.FromHtml("#F4B084");
+                ws.Cell(r, 12).Style.Font.Bold = true;
+            }
+
             r++;
         }
 
@@ -149,6 +159,7 @@ public class ReportsController : AppController
         ws.Column(3).Width = 24; // Employee name
         ws.Column(10).Width = 14; // Late
         ws.Column(11).Width = 18; // Email Notifications
+        ws.Column(12).Width = 14; // Offline Time
         ws.SheetView.FreezeRows(1);
 
         var fileName =
@@ -223,6 +234,26 @@ public class ReportsController : AppController
         var byUserDate = attendances
             .GroupBy(a => (a.UserId, a.WorkDate))
             .ToDictionary(g => g.Key, AggregateDailyAttendance);
+
+        var presenceRangeStartUtc = start
+            .ToDateTime(TimeOnly.MinValue, DateTimeKind.Utc)
+            .AddHours(-14);
+        var presenceRangeEndUtc = end
+            .AddDays(1)
+            .ToDateTime(TimeOnly.MinValue, DateTimeKind.Utc)
+            .AddHours(14);
+        var presenceIntervals = await Db.PresenceIntervals
+            .Where(p => userIds.Contains(p.UserId)
+                && p.StartedAt < presenceRangeEndUtc
+                && (p.EndedAt == null || p.EndedAt >= presenceRangeStartUtc))
+            .ToListAsync();
+        var presenceNowUtc = DateTime.UtcNow;
+        var presenceByUserId = presenceIntervals
+            .GroupBy(p => p.UserId)
+            .ToDictionary(g => g.Key, g => (IEnumerable<PresenceInterval>)g.ToList());
+        var attendanceByUserId = attendances
+            .GroupBy(a => a.UserId)
+            .ToDictionary(g => g.Key, g => (IEnumerable<Attendance>)g.ToList());
 
         // Violation counts per (user, date) from the notification audit log.
         var startUtc = start.ToDateTime(TimeOnly.MinValue, DateTimeKind.Utc);
@@ -420,6 +451,12 @@ public class ReportsController : AppController
                             ? 0
                             : LateCheck.Evaluate(u, sched, att.CheckIn, isHoliday: isHoliday).LateMinutes,
                     EmailNotifications = notifBucket?.Count ?? 0,
+                    OfflineSeconds = PresenceTracker.OfflineSecondsForDate(
+                        u,
+                        d,
+                        presenceByUserId.GetValueOrDefault(u.Id, []),
+                        presenceNowUtc,
+                        attendanceByUserId.GetValueOrDefault(u.Id, [])),
                     Notification30To60Details = notifBucket is null
                         ? string.Empty
                         : string.Join("\n", notifBucket.From30To60),

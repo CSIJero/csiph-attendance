@@ -144,6 +144,12 @@ public class DashboardController : AppController
         var todayHolidayRows = await Db.Holidays
             .Where(h => relevantScheduleDates.Contains(h.Date))
             .ToListAsync();
+        var presenceIntervals = await Db.PresenceIntervals
+            .Where(p => userIds.Contains(p.UserId)
+                && (p.EndedAt == null
+                    || p.EndedAt >= DateTime.UtcNow.AddDays(-2)))
+            .ToListAsync();
+        var presenceNowUtc = DateTime.UtcNow;
 
         var rows = new List<TeamRowViewModel>();
         var online = 0;
@@ -187,6 +193,12 @@ public class DashboardController : AppController
                 Attendance = att,
                 TodaySchedule = sched,
                 Late = late,
+                OfflineSecondsToday = PresenceTracker.OfflineSecondsForDate(
+                    u,
+                    UserClock.TodayFor(u),
+                    presenceIntervals,
+                    presenceNowUtc,
+                    todaysRows),
             });
         }
 

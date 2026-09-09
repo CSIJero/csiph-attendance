@@ -25,6 +25,7 @@ public class AppDbContext : DbContext, IDataProtectionKeyContext
     public DbSet<LeaveBalance> LeaveBalances => Set<LeaveBalance>();
     public DbSet<PushSubscription> PushSubscriptions => Set<PushSubscription>();
     public DbSet<RuntimeSetting> RuntimeSettings => Set<RuntimeSetting>();
+    public DbSet<PresenceInterval> PresenceIntervals => Set<PresenceInterval>();
 
     // ASP.NET Core data-protection keys. Stored in the same Postgres DB so
     // auth cookies survive Render container redeploys (free tier has no
@@ -96,6 +97,23 @@ public class AppDbContext : DbContext, IDataProtectionKeyContext
             e.HasOne(a => a.User)
                 .WithMany(u => u.Attendances)
                 .HasForeignKey(a => a.UserId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        b.Entity<PresenceInterval>(e =>
+        {
+            e.ToTable("presence_intervals");
+            e.HasIndex(p => p.UserId)
+                .HasDatabaseName("IX_presence_intervals_UserId");
+            e.HasIndex(p => p.UserId)
+                .IsUnique()
+                .HasFilter("\"EndedAt\" IS NULL")
+                .HasDatabaseName("UX_presence_intervals_OpenUser");
+            e.HasIndex(p => p.StartedAt);
+            e.HasIndex(p => p.EndedAt);
+            e.HasOne(p => p.User)
+                .WithMany(u => u.PresenceIntervals)
+                .HasForeignKey(p => p.UserId)
                 .OnDelete(DeleteBehavior.Cascade);
         });
 

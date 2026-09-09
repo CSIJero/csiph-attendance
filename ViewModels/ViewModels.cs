@@ -79,6 +79,8 @@ public class TeamRowViewModel
     public ScheduleEntry? TodaySchedule { get; set; }
     /// <summary>Cached late-arrival evaluation for today's check-in; null when no check-in.</summary>
     public LateCheck.Result? Late { get; set; }
+    /// <summary>Cumulative explicit offline time for the user's local day.</summary>
+    public int OfflineSecondsToday { get; set; }
 }
 
 public class EmployeeDashboardViewModel
@@ -438,6 +440,8 @@ public class DailyReportRow
     /// for this user on this date (from NotificationLog where Status="Sent").
     /// </summary>
     public int EmailNotifications { get; set; }
+    /// <summary>Cumulative explicit offline time for this user's local date.</summary>
+    public int OfflineSeconds { get; set; }
     /// <summary>Per-send timestamps where offline minutes were 30..60.</summary>
     public string Notification30To60Details { get; set; } = string.Empty;
     /// <summary>Per-send timestamps where offline minutes were above 60.</summary>

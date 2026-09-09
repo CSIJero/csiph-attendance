@@ -100,11 +100,8 @@ public class AccountController : AppController
         user.LastLoginAgent = ClientInfo.GetAgentLabel(HttpContext);
         user.LastLoginAt = DateTime.UtcNow;
         user.LastSeen = DateTime.UtcNow;
-        // Login implies the user is in front of the workstation; clear any
-        // stale "PC was locked" stamp from the previous session so the
-        // offline-notifier doesn't immediately reuse it.
-        user.PresenceState = "online";
-        user.OfflineSince = null;
+        await PresenceTracker.MarkPresentAsync(
+            Db, user, "online", "login", DateTime.UtcNow);
         await Db.SaveChangesAsync();
 
         TempData.Flash($"Welcome back, {user.FullName}!", "success");
@@ -133,13 +130,10 @@ public class AccountController : AppController
         var user = await GetCurrentUserAsync();
         if (user is not null)
         {
-            // Logout marks the user offline (clears LastSeen) but does NOT
-            // close their attendance row. Forgetting to click "Check out"
-            // before signing out would otherwise silently end their shift,
-            // which the team agreed should never happen automatically.
-            user.LastSeen = null;
-            user.PresenceState = "offline";
-            user.OfflineSince ??= DateTime.UtcNow;
+            // Logout changes presence but does not close attendance. LastSeen
+            // remains the last successful heartbeat for audit/reporting.
+            await PresenceTracker.MarkOfflineAsync(
+                Db, user, "logout", DateTime.UtcNow);
             await Db.SaveChangesAsync();
         }
 

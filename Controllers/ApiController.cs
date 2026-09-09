@@ -83,18 +83,19 @@ public class ApiController : ControllerBase
             u.PresenceState = clientState;
         }
 
-        // Maintain OfflineSince: stamp when we first see "offline",
-        // clear when transitioning back to any other state. The offline
-        // notifier uses this column directly (instead of LastSeen
-        // staleness) so alert cadence reflects PC-lock duration, not
-        // heartbeat health.
         if (u.PresenceState == "offline")
         {
-            u.OfflineSince ??= DateTime.UtcNow;
+            await PresenceTracker.MarkOfflineAsync(
+                _db,
+                u,
+                null,
+                DateTime.UtcNow,
+                preserveExistingReason: true);
         }
         else
         {
-            u.OfflineSince = null;
+            await PresenceTracker.MarkPresentAsync(
+                _db, u, u.PresenceState, "heartbeat", DateTime.UtcNow);
         }
 
         await _db.SaveChangesAsync();
@@ -210,10 +211,10 @@ public class ApiController : ControllerBase
         }
 
         u.LunchesUsedToday += 1;
-        u.PresenceState = "lunch";
         u.LunchStartedAt = DateTime.UtcNow;
         u.LastSeen = DateTime.UtcNow;
-        u.OfflineSince = null;
+        await PresenceTracker.MarkPresentAsync(
+            _db, u, "lunch", "lunch_started", DateTime.UtcNow);
         await _db.SaveChangesAsync();
 
         return new JsonResult(new
@@ -236,9 +237,9 @@ public class ApiController : ControllerBase
         if (u is null) return Unauthorized();
 
         u.LunchStartedAt = null;
-        u.PresenceState = "online";
         u.LastSeen = DateTime.UtcNow;
-        u.OfflineSince = null;
+        await PresenceTracker.MarkPresentAsync(
+            _db, u, "online", "lunch_ended", DateTime.UtcNow);
         await _db.SaveChangesAsync();
 
         return new JsonResult(new
@@ -287,10 +288,10 @@ public class ApiController : ControllerBase
         }
 
         u.BreaksUsedToday += 1;
-        u.PresenceState = "break";
         u.BreakStartedAt = DateTime.UtcNow;
         u.LastSeen = DateTime.UtcNow;
-        u.OfflineSince = null;
+        await PresenceTracker.MarkPresentAsync(
+            _db, u, "break", "break_started", DateTime.UtcNow);
         await _db.SaveChangesAsync();
 
         return new JsonResult(new
@@ -313,9 +314,9 @@ public class ApiController : ControllerBase
         if (u is null) return Unauthorized();
 
         u.BreakStartedAt = null;
-        u.PresenceState = "online";
         u.LastSeen = DateTime.UtcNow;
-        u.OfflineSince = null;
+        await PresenceTracker.MarkPresentAsync(
+            _db, u, "online", "break_ended", DateTime.UtcNow);
         await _db.SaveChangesAsync();
 
         return new JsonResult(new
@@ -327,8 +328,16 @@ public class ApiController : ControllerBase
         });
     }
 
+    public sealed class OfflineRequest
+    {
+        public string? Reason { get; set; }
+    }
+
     [HttpPost("offline")]
-    public async Task<IActionResult> GoOffline()
+    public async Task<IActionResult> GoOffline(
+        [FromBody(EmptyBodyBehavior =
+            Microsoft.AspNetCore.Mvc.ModelBinding.EmptyBodyBehavior.Allow)]
+        OfflineRequest? body = null)
     {
         var raw = User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
         if (!int.TryParse(raw, out var id)) return Unauthorized();
@@ -336,11 +345,16 @@ public class ApiController : ControllerBase
         var u = await _db.Users.FirstOrDefaultAsync(x => x.Id == id);
         if (u is null) return Unauthorized();
 
-        u.LastSeen = null;
-        u.PresenceState = "offline";
-        u.OfflineSince ??= DateTime.UtcNow;
+        await PresenceTracker.MarkOfflineAsync(
+            _db, u, body?.Reason, DateTime.UtcNow);
         await _db.SaveChangesAsync();
-        return new JsonResult(new { ok = true });
+        return new JsonResult(new
+        {
+            ok = true,
+            state = u.PresenceState,
+            reason = u.PresenceReason,
+            last_seen = u.LastSeen?.ToString("o"),
+        });
     }
 
     public class LocationSetRequest
@@ -432,6 +446,12 @@ public class ApiController : ControllerBase
         var todayHolidayRows = await _db.Holidays
             .Where(h => h.Date == today)
             .ToListAsync();
+        var presenceIntervals = await _db.PresenceIntervals
+            .Where(p => userIds.Contains(p.UserId)
+                && (p.EndedAt == null
+                    || p.EndedAt >= DateTime.UtcNow.AddDays(-2)))
+            .ToListAsync();
+        var presenceNowUtc = DateTime.UtcNow;
 
         var payload = new List<object>();
         var online = 0;
@@ -461,7 +481,15 @@ public class ApiController : ControllerBase
                 business_unit = u.BusinessUnit,
                 online = isOnline,
                 state,
-                last_seen = u.LastSeen?.ToString("o"),
+                presence_reason = u.PresenceReason,
+                logout_at = u.LogoutAt?.ToString("o"),
+                last_seen = u.EffectiveLastSeen.ToString("o"),
+                offline_seconds_today = PresenceTracker.OfflineSecondsForDate(
+                    u,
+                    UserClock.TodayFor(u),
+                    presenceIntervals,
+                    presenceNowUtc,
+                    attendanceRows),
                 lunch_ends_at = state == "lunch" ? LunchEndsAt(u)?.ToString("o") : null,
                 break_ends_at = state == "break" ? BreakEndsAt(u)?.ToString("o") : null,
                 checked_in = att is not null,

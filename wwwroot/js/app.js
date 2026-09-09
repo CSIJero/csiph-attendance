@@ -328,6 +328,7 @@
     function renderRow(tr, u) {
         const dot = tr.querySelector('[data-cell="dot"]');
         const statusText = tr.querySelector('[data-cell="status-text"]');
+        const presenceReason = tr.querySelector('[data-cell="presence-reason"]');
         const lastSeen = tr.querySelector('[data-cell="last-seen"]');
         const clockIn = tr.querySelector('[data-cell="clock-in"]');
         const clockOut = tr.querySelector('[data-cell="clock-out"]');
@@ -364,6 +365,16 @@
                 label = `Break (${left}m left)`;
             }
             statusText.textContent = label;
+        }
+        if (presenceReason) {
+            const isOffline = (u.state || "offline") === "offline";
+            const reason = String(u.presence_reason || "unknown")
+                .replaceAll("_", " ");
+            const logoutAt = u.presence_reason === "logout" && u.logout_at
+                ? ` ${fmtTime(u.logout_at)}`
+                : "";
+            presenceReason.textContent = `${reason}${logoutAt}`;
+            presenceReason.hidden = !isOffline;
         }
         if (workTypeFlag) {
             const wt = (u.today_work_type || "").toLowerCase();
@@ -442,23 +453,18 @@
             }
         }
         if (offlineFor) {
-            // -1 = online (no offline duration); -2 = never seen.
-            if (u.online) {
-                offlineFor.dataset.offlineMinutes = "-1";
-                offlineFor.innerHTML = dash;
-            } else if (u.last_seen) {
-                const ms = Date.now() - new Date(u.last_seen).getTime();
-                const minutes = Math.max(0, Math.round(ms / 60000));
-                offlineFor.dataset.offlineMinutes = String(minutes);
-                offlineFor.textContent = formatOfflineFor(minutes);
-            } else {
-                offlineFor.dataset.offlineMinutes = "-2";
-                offlineFor.innerHTML = '<span class="muted">never</span>';
-            }
+            const seconds = Math.max(0, Number(u.offline_seconds_today) || 0);
+            const minutes = Math.floor(seconds / 60);
+            offlineFor.dataset.offlineSeconds = String(seconds);
+            offlineFor.dataset.offlineAccruing =
+                u.state === "offline" && u.checked_in && !u.check_out ? "1" : "0";
+            offlineFor.textContent = formatOfflineFor(minutes);
+            offlineFor.classList.toggle("offline-over-limit", seconds > 3600);
         }
     }
 
     function formatOfflineFor(minutes) {
+        if (minutes <= 0) return "0 m";
         if (minutes < 1) return "< 1 m";
         if (minutes < 60) return `${minutes} m`;
         const h = Math.floor(minutes / 60);
@@ -469,26 +475,21 @@
         return hr === 0 ? `${d} d` : `${d} d ${hr} h`;
     }
 
-    // Re-render only the offline-for cells from existing data attributes.
-    // Used between /api/status refreshes so the duration ticks up live.
+    // Advance an open offline interval between API refreshes. Online rows keep
+    // showing their cumulative total for the day rather than a dash.
     function refreshOfflineForCells() {
         const table = document.getElementById("status-table");
         if (!table) return;
         for (const cell of table.querySelectorAll('[data-cell="offline-for"]')) {
             const tr = cell.closest("tr");
-            // Online / Away / Lunch rows have no offline duration to show.
-            const dotEl = tr?.querySelector('[data-cell="dot"]');
-            const isOffline = dotEl?.classList.contains("dot-offline");
-            if (!isOffline) {
-                cell.dataset.offlineMinutes = "-1";
-                cell.innerHTML = '<span class="muted">&mdash;</span>';
-                continue;
-            }
-            const stored = parseInt(cell.dataset.offlineMinutes || "-2", 10);
-            if (stored === -2) continue; // never seen — leave alone
-            const next = (stored < 0 ? 0 : stored) + 1;
-            cell.dataset.offlineMinutes = String(next);
-            cell.textContent = formatOfflineFor(next);
+            const isAccruing = cell.dataset.offlineAccruing === "1";
+            const stored = Math.max(
+                0,
+                parseInt(cell.dataset.offlineSeconds || "0", 10) || 0);
+            const next = stored + (isAccruing ? 60 : 0);
+            cell.dataset.offlineSeconds = String(next);
+            cell.textContent = formatOfflineFor(Math.floor(next / 60));
+            cell.classList.toggle("offline-over-limit", next > 3600);
         }
     }
 
@@ -583,13 +584,8 @@
             return "\uffff"; // missing sorts last in asc
         },
         "offline-for": (tr) => {
-            // -1 = online (sort first asc), -2 = never (sort last asc),
-            // anything else = minutes offline.
-            const raw = tr.querySelector('[data-cell="offline-for"]')?.dataset.offlineMinutes;
-            const v = parseInt(raw ?? "-1", 10);
-            if (v === -1) return -1;
-            if (v === -2) return Number.MAX_SAFE_INTEGER;
-            return v;
+            const raw = tr.querySelector('[data-cell="offline-for"]')?.dataset.offlineSeconds;
+            return parseInt(raw ?? "0", 10) || 0;
         },
     };
 
@@ -737,17 +733,21 @@
         }
     }
 
-    function sendOffline(useBeacon) {
+    function sendOffline(reason, useBeacon) {
         // sendBeacon survives tab close / navigation away; fall back to fetch.
+        const payload = JSON.stringify({ reason });
         try {
             if (useBeacon && navigator.sendBeacon) {
-                navigator.sendBeacon("/api/offline", new Blob([], { type: "application/json" }));
+                navigator.sendBeacon(
+                    "/api/offline",
+                    new Blob([payload], { type: "application/json" }));
             } else {
                 fetch("/api/offline", {
                     method: "POST",
                     headers: jsonHeaders(),
                     credentials: "same-origin",
                     keepalive: true,
+                    body: payload,
                 });
             }
         } catch (err) {
@@ -865,13 +865,8 @@
     // that explicitly marks the user offline.
     window.addEventListener("pagehide", () => {
         stopTimers();
-        sendOffline(true);
+        sendOffline("browser_closed", true);
     });
-    window.addEventListener("beforeunload", () => {
-        stopTimers();
-        sendOffline(true);
-    });
-
     // ---------------------------------------------------------------
     // Windows lock-screen + idle detection (Idle Detection API)
     // ---------------------------------------------------------------
@@ -914,8 +909,9 @@
             // waiting for the heartbeat threshold to age out.
             if (currentState !== "offline") {
                 stopTimers();
-                setState("offline");
-                sendOffline(false);
+                currentState = "offline";
+                setSelfDot("offline");
+                sendOffline("locked", false);
             }
         } else {
             // Screen unlocked → Online. Resume timers if we were offline.

@@ -68,6 +68,16 @@ public class User
 
     public DateTime? LastSeen { get; set; }
 
+    [NotMapped]
+    public DateTime EffectiveLastSeen => LastSeen ?? LastLoginAt ?? CreatedAt;
+
+    /// <summary>The most recent explicit presence transition reason.</summary>
+    [MaxLength(32)]
+    public string PresenceReason { get; set; } = "never_seen";
+
+    /// <summary>The most recent explicit application logout time (UTC).</summary>
+    public DateTime? LogoutAt { get; set; }
+
     /// <summary>
     /// Tri-state presence reported by the browser:
     ///   "online"  – user is active (or just minimized; minimize is NOT away).
@@ -93,6 +103,9 @@ public class User
     /// reports any non-offline state (online / lunch).
     /// </summary>
     public DateTime? OfflineSince { get; set; }
+
+    public ICollection<PresenceInterval> PresenceIntervals { get; set; } =
+        new List<PresenceInterval>();
 
     /// <summary>
     /// When the current lunch break started (UTC). Null when not on lunch.
