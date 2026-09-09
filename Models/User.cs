@@ -290,12 +290,8 @@ public class User
     /// <see cref="Constants.LunchBreakMinutes"/> minutes after
     /// <see cref="LunchStartedAt"/>.
     /// </para>
-    /// <para>
-    /// Note: the offline-alert email pipeline still uses
-    /// <see cref="LastSeen"/> staleness directly so a missing heartbeat
-    /// during shift hours still escalates to notifications — only the
-    /// on-screen badge is affected by this method.
-    /// </para>
+    /// The offline-alert email pipeline uses this same explicit state so
+    /// dashboard badges and notifications remain consistent.
     /// </summary>
     public string EffectiveState(int thresholdSeconds = 60)
     {
@@ -310,23 +306,16 @@ public class User
     }
 
     /// <summary>
-    /// Computes dashboard presence while requiring an active clock-in and recent login.
-    /// Employees without an open attendance row, or whose login session is
-    /// older than the maximum session length, are displayed as offline.
+    /// Computes dashboard presence while requiring an active clock-in.
+    /// Once clocked in, the heartbeat-managed presence state is the source
+    /// of truth so employee and manager dashboards cannot disagree merely
+    /// because the original login is older than a fixed duration.
     /// </summary>
     public string EffectiveDashboardState(
         Attendance? attendance,
         int thresholdSeconds = 60)
     {
         if (attendance is null || !attendance.IsOpen) return "offline";
-        if (LastLoginAt is null) return "offline";
-
-        var lastLoginUtc = DateTime.SpecifyKind(LastLoginAt.Value, DateTimeKind.Utc);
-        if (DateTime.UtcNow > lastLoginUtc.AddHours(Constants.MaximumOnlineLoginHours))
-        {
-            return "offline";
-        }
-
         return EffectiveState(thresholdSeconds);
     }
 

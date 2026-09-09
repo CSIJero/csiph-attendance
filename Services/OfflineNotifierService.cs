@@ -200,7 +200,9 @@ public class OfflineNotifierService : BackgroundService
             var u = att.User;
             if (u is null) continue;
             if (string.Equals(u.Role, Roles.Admin, StringComparison.OrdinalIgnoreCase)) continue;
-            var isEmployee = string.Equals(u.Role, Roles.Employee, StringComparison.OrdinalIgnoreCase);
+            var hasTrackedShift = string.Equals(u.Role, Roles.Employee, StringComparison.OrdinalIgnoreCase)
+                || string.Equals(u.Role, Roles.Pm, StringComparison.OrdinalIgnoreCase)
+                || string.Equals(u.Role, Roles.ProgramManager, StringComparison.OrdinalIgnoreCase);
 
             // Policy: pause ALL notification emails on statutory holidays
             // for the user's local date. Keep auto-close behavior active
@@ -210,7 +212,7 @@ public class OfflineNotifierService : BackgroundService
 
             await HandleCutoffAsync(
                 db, email, opts, att, u, nowUtc, ct,
-                sendNotifications: !isHolidayToday && isEmployee);
+                sendNotifications: !isHolidayToday && hasTrackedShift);
 
             if (isHolidayToday) continue;
 
@@ -220,7 +222,7 @@ public class OfflineNotifierService : BackgroundService
             // we detect the check-in is past the shift start + grace.
             // LateCheck handles per-region grace (PH Onsite 15 / PH Offsite 0
             // / India 60). Support / Dayoff / Admin all return NotApplicable.
-            if (isEmployee && !state.LateAlertSent)
+            if (hasTrackedShift && !state.LateAlertSent)
             {
                 var schedForLate = await DbInitializer.GetEffectiveScheduleForDateAsync(
                     db, u, att.WorkDate);
@@ -244,7 +246,7 @@ public class OfflineNotifierService : BackgroundService
                 }
             }
 
-            if (isEmployee && !state.ForgotCheckoutSent)
+            if (hasTrackedShift && !state.ForgotCheckoutSent)
             {
                 // Primary trigger: 5 minutes before the user's scheduled
                 // end-of-shift (anchored to the check-in's local date so an
@@ -312,54 +314,30 @@ public class OfflineNotifierService : BackgroundService
                 }
             }
 
-            // Explicit browser events (lock, logout, tab close) stamp
-            // OfflineSince. A real connectivity loss cannot call /api/offline,
-            // so also treat a stale heartbeat as offline after the configured
-            // online threshold. Without this fallback, network outages never
-            // reach the reminder pipeline.
-            var isExplicitlyOffline = string.Equals(
-                u.PresenceState,
-                "offline",
-                StringComparison.OrdinalIgnoreCase);
+            if (string.Equals(u.PresenceState, "lunch", StringComparison.OrdinalIgnoreCase) && u.IsLunchActive()) continue;
+            if (string.Equals(u.PresenceState, "break", StringComparison.OrdinalIgnoreCase) && u.IsBreakActive()) continue;
+
+            // Use the same explicit presence state shown on both dashboards.
+            // LastSeen is diagnostic data, not proof that an online user went
+            // offline; treating it as such creates false recurring alerts.
+            if (!string.Equals(u.PresenceState, "offline", StringComparison.OrdinalIgnoreCase)) continue;
+
             var lastSeenUtc = u.LastSeen is { } seen
                 ? DateTime.SpecifyKind(seen, DateTimeKind.Utc)
                 : (DateTime?)null;
+            var offlineSinceUtc = u.OfflineSince is { } explicitSince
+                ? DateTime.SpecifyKind(explicitSince, DateTimeKind.Utc)
+                : lastSeenUtc ?? nowUtc;
 
-            DateTime? effectiveOfflineSinceUtc;
-            if (isExplicitlyOffline)
+            // Repair legacy explicitly-offline rows that predate OfflineSince.
+            if (u.OfflineSince is null)
             {
-                if (u.OfflineSince is { } explicitSince)
-                {
-                    effectiveOfflineSinceUtc = DateTime.SpecifyKind(
-                        explicitSince,
-                        DateTimeKind.Utc);
-                }
-                else
-                {
-                    // Legacy rows created before OfflineSince was introduced
-                    // can already be marked offline without an anchor. Persist
-                    // one now so subsequent scans can reach the warning limit.
-                    effectiveOfflineSinceUtc = lastSeenUtc ?? nowUtc;
-                    u.OfflineSince = effectiveOfflineSinceUtc;
-                    await db.SaveChangesAsync(ct);
-                }
-            }
-            else
-            {
-                effectiveOfflineSinceUtc = lastSeenUtc is { } lastSeen
-                    && nowUtc - lastSeen >= _onlineThreshold
-                        ? lastSeen.Add(_onlineThreshold)
-                        : null;
+                u.OfflineSince = offlineSinceUtc;
+                await db.SaveChangesAsync(ct);
             }
 
-            if (effectiveOfflineSinceUtc is null) continue;
-
-            var offlineSinceUtc = effectiveOfflineSinceUtc.Value;
             var offlineFor = nowUtc - offlineSinceUtc;
             if (offlineFor < warnAfter) continue;
-
-            if (string.Equals(u.PresenceState, "lunch", StringComparison.OrdinalIgnoreCase) && u.IsLunchActive()) continue;
-            if (string.Equals(u.PresenceState, "break", StringComparison.OrdinalIgnoreCase) && u.IsBreakActive()) continue;
 
             var lastUtc = lastSeenUtc ?? offlineSinceUtc;
 
@@ -382,12 +360,12 @@ public class OfflineNotifierService : BackgroundService
             }
 
             var minutes = (int)Math.Round(offlineFor.TotalMinutes);
-            if (!isEmployee) continue;
+            if (!hasTrackedShift) continue;
             var recipientsOffline = BuildRecipients(
                 opts,
                 TeamManagerRecipientsFor(u),
                 u,
-                includeManagers: isEmployee && minutes >= 60);
+                includeManagers: minutes >= 60);
             var (offlineSubject, offlineBody) = BuildMessage(toSend, u, att, minutes, lastUtc, opts.OfflineThresholdMinutes);
 
             var offKey = $"offline:{att.Id}:{toSend}";
