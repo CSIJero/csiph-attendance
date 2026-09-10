@@ -900,7 +900,12 @@
         window.addEventListener(eventName, recordInputActivity, { passive: true });
     }
     inputInactivityTimer = setInterval(() => {
-        if (!idleDetector && Date.now() - lastInputAt >= IDLE_THRESHOLD_MS) {
+        // Page-scoped input events stop when the browser is minimized or the
+        // user works in another application. Only infer inactivity while this
+        // page is visible; IdleDetector handles system-wide idle when allowed.
+        if (!idleDetector
+            && document.visibilityState === "visible"
+            && Date.now() - lastInputAt >= IDLE_THRESHOLD_MS) {
             markInactive();
         }
     }, 15000);
@@ -918,6 +923,7 @@
     document.addEventListener("visibilitychange", () => {
         if (document.visibilityState === "visible") {
             if (DEBUG) console.log("[heartbeat] visible -> ping");
+            recordInputActivity();
             pingHeartbeat();
             refreshDashboard();
         }
