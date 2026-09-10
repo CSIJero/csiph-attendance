@@ -198,7 +198,8 @@ public class DashboardController : AppController
                     UserClock.TodayFor(u),
                     presenceIntervals,
                     presenceNowUtc,
-                    todaysRows),
+                    todaysRows,
+                    _onlineThreshold),
             });
         }
 

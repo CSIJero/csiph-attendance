@@ -8,6 +8,13 @@ namespace AttendanceMonitoring.Services;
 
 public class OfflineNotifierService : BackgroundService
 {
+    private static readonly HashSet<string> NotifiableOfflineReasons =
+    [
+        "locked",
+        "logout",
+        "browser_closed",
+    ];
+
     private enum AlertLevel
     {
         None = 0,
@@ -317,19 +324,31 @@ public class OfflineNotifierService : BackgroundService
             if (string.Equals(u.PresenceState, "lunch", StringComparison.OrdinalIgnoreCase) && u.IsLunchActive()) continue;
             if (string.Equals(u.PresenceState, "break", StringComparison.OrdinalIgnoreCase) && u.IsBreakActive()) continue;
 
-            // Use the same explicit presence state shown on both dashboards.
-            // LastSeen is diagnostic data, not proof that an online user went
-            // offline; treating it as such creates false recurring alerts.
-            if (!string.Equals(u.PresenceState, "offline", StringComparison.OrdinalIgnoreCase)) continue;
+            var thresholdSeconds = (int)Math.Ceiling(_onlineThreshold.TotalSeconds);
+            var effectiveOfflineSince = u.EffectiveOfflineSince(
+                nowUtc,
+                thresholdSeconds);
+            if (effectiveOfflineSince is null) continue;
+
+            var offlineReason = string.Equals(
+                    u.PresenceState,
+                    "offline",
+                    StringComparison.OrdinalIgnoreCase)
+                ? PresenceTracker.NormalizeOfflineReason(u.PresenceReason)
+                : "heartbeat_timeout";
+
+            // Hidden/minimized tabs remain an attendance signal but must not
+            // produce employee or manager emails. Only explicit workstation
+            // lock, logout, and browser-close transitions are actionable.
+            if (!NotifiableOfflineReasons.Contains(offlineReason)) continue;
 
             var lastSeenUtc = u.LastSeen is { } seen
                 ? DateTime.SpecifyKind(seen, DateTimeKind.Utc)
                 : (DateTime?)null;
             var offlineSinceUtc = u.OfflineSince is { } explicitSince
                 ? DateTime.SpecifyKind(explicitSince, DateTimeKind.Utc)
-                : lastSeenUtc ?? nowUtc;
+                : effectiveOfflineSince.Value;
 
-            // Repair legacy explicitly-offline rows that predate OfflineSince.
             if (u.OfflineSince is null)
             {
                 u.OfflineSince = offlineSinceUtc;

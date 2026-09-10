@@ -25,7 +25,14 @@ namespace AttendanceMonitoring.Controllers;
 [Route("reports")]
 public class ReportsController : AppController
 {
-    public ReportsController(AppDbContext db) : base(db) { }
+    private readonly int _onlineThreshold;
+
+    public ReportsController(AppDbContext db, IConfiguration config) : base(db)
+    {
+        _onlineThreshold = config.GetValue(
+            "AttendanceMonitoring:OnlineThresholdSeconds",
+            Constants.DefaultOnlineThresholdSeconds);
+    }
 
     [HttpGet("")]
     public async Task<IActionResult> Daily(
@@ -456,7 +463,8 @@ public class ReportsController : AppController
                         d,
                         presenceByUserId.GetValueOrDefault(u.Id, []),
                         presenceNowUtc,
-                        attendanceByUserId.GetValueOrDefault(u.Id, [])),
+                        attendanceByUserId.GetValueOrDefault(u.Id, []),
+                        _onlineThreshold),
                     Notification30To60Details = notifBucket is null
                         ? string.Empty
                         : string.Join("\n", notifBucket.From30To60),

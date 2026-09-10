@@ -12,6 +12,7 @@ public static class PresenceTracker
         "locked",
         "page_hidden",
         "browser_closed",
+        "heartbeat_timeout",
         "unknown",
     ];
 
@@ -55,6 +56,7 @@ public static class PresenceTracker
         string state,
         string reason,
         DateTime nowUtc,
+        int offlineThresholdSeconds = Constants.DefaultOnlineThresholdSeconds,
         CancellationToken cancellationToken = default)
     {
         nowUtc = AsUtc(nowUtc);
@@ -62,6 +64,29 @@ public static class PresenceTracker
             .Where(interval => interval.UserId == user.Id
                 && interval.EndedAt == null)
             .ToListAsync(cancellationToken);
+
+        // If all client signals disappeared, the notifier may not have run
+        // before this recovery request. Persist the elapsed outage now so it
+        // is still represented in dashboard and historical report totals.
+        if (openIntervals.Count == 0
+            && user.EffectiveOfflineSince(nowUtc, offlineThresholdSeconds) is { } inferredStart
+            && inferredStart < nowUtc)
+        {
+            var interval = new PresenceInterval
+            {
+                UserId = user.Id,
+                StartedAt = inferredStart,
+                EndedAt = nowUtc,
+                Reason = string.Equals(
+                    user.PresenceState,
+                    "offline",
+                    StringComparison.OrdinalIgnoreCase)
+                        ? NormalizeOfflineReason(user.PresenceReason)
+                        : "heartbeat_timeout",
+            };
+            db.PresenceIntervals.Add(interval);
+        }
+
         foreach (var interval in openIntervals)
         {
             interval.EndedAt = nowUtc < interval.StartedAt
@@ -79,7 +104,8 @@ public static class PresenceTracker
         DateOnly date,
         IEnumerable<PresenceInterval> intervals,
         DateTime nowUtc,
-        IEnumerable<Attendance>? attendances = null)
+        IEnumerable<Attendance>? attendances = null,
+        int offlineThresholdSeconds = Constants.DefaultOnlineThresholdSeconds)
     {
         var offset = UserClock.OffsetFor(user);
         var localStart = date.ToDateTime(TimeOnly.MinValue);
@@ -101,8 +127,10 @@ public static class PresenceTracker
             attendanceWindows = MergeWindows(attendanceWindows);
         }
 
-        var offlineWindows = intervals
+        var userIntervals = intervals
             .Where(interval => interval.UserId == user.Id)
+            .ToList();
+        var offlineWindows = userIntervals
             .Select(interval =>
             {
                 var intervalStart = AsUtc(interval.StartedAt);
@@ -115,14 +143,26 @@ public static class PresenceTracker
             })
             .Where(window => window.End > window.Start)
             .OrderBy(window => window.Start)
-            .ToArray();
-        if (offlineWindows.Length > 1)
+            .ToList();
+
+        if (!userIntervals.Any(interval => interval.EndedAt == null)
+            && user.EffectiveOfflineSince(nowUtc, offlineThresholdSeconds) is { } inferredStart)
         {
-            offlineWindows = MergeWindows(offlineWindows);
+            var clippedStart = inferredStart > startUtc ? inferredStart : startUtc;
+            var clippedEnd = nowUtc < endUtc ? nowUtc : endUtc;
+            if (clippedEnd > clippedStart)
+            {
+                offlineWindows.Add((clippedStart, clippedEnd));
+                offlineWindows.Sort((left, right) => left.Start.CompareTo(right.Start));
+            }
         }
 
+        var mergedOfflineWindows = offlineWindows.Count > 1
+            ? MergeWindows(offlineWindows)
+            : offlineWindows.ToArray();
+
         double totalSeconds = 0;
-        foreach (var offlineWindow in offlineWindows)
+        foreach (var offlineWindow in mergedOfflineWindows)
         {
             if (attendanceWindows is null)
             {

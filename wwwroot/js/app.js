@@ -2,12 +2,13 @@
 (function () {
     const HEARTBEAT_MS = 15000;   // tell server we're online every 15s
     const REFRESH_MS = 15000;     // re-fetch dashboard data every 15s
-    const IDLE_THRESHOLD_MS = 15 * 60 * 1000; // 15 min → Away
+    const IDLE_THRESHOLD_MS = 15 * 60 * 1000;
     const DEBUG = true;           // log heartbeat lifecycle to the console
 
     // Client-tracked presence. Sent on every heartbeat so the server
-    // knows whether the user is Online (active), Away (system idle >15m),
-    // or Offline (Windows locked / tab closing). Minimizing or switching
+    // knows whether the user is Online, on a break, or Offline (Windows
+    // locked / tab closing). Minimizing, switching tabs, and keyboard/mouse
+    // inactivity are not state changes.
     // tabs is NOT a state change — the user is still "online".
     let currentState = "online";
 
@@ -26,6 +27,8 @@
     let breaksUsed = 0;
     let lunchesMax = 1; // overwritten from the lunch button's data-lunch-max
     let breaksMax = 2;  // overwritten from the break button's data-break-max
+    let lastFallbackSignalAt = 0;
+    const fallbackSignals = new Set();
 
     function setState(next) {
         if (next !== "online" && next !== "away" && next !== "offline" && next !== "lunch" && next !== "break") return;
@@ -39,6 +42,27 @@
 
     function jsonHeaders() {
         return { "Content-Type": "application/json", "X-Requested-With": "fetch" };
+    }
+
+    // Separate URL and browser transport from /api/heartbeat. This remains
+    // usable when that endpoint is filtered or a fetch wrapper/extension
+    // blocks the normal heartbeat request.
+    function sendFallbackSignal() {
+        // A locked workstation or closing page must remain explicitly
+        // offline. This also prevents the watchdog's failed offline
+        // heartbeat from immediately undoing the lock transition.
+        if (currentState === "offline") return;
+
+        const now = Date.now();
+        if (now - lastFallbackSignalAt < 10000) return;
+        lastFallbackSignalAt = now;
+
+        const image = new Image();
+        fallbackSignals.add(image);
+        const release = () => fallbackSignals.delete(image);
+        image.onload = release;
+        image.onerror = release;
+        image.src = `/session/pulse.gif?t=${now}`;
     }
 
     // -----------------------------------------------------------------
@@ -112,6 +136,7 @@
                 // transient response. The next worker tick (or watchdog) will
                 // retry; keep the current UI state until then.
                 if (DEBUG) console.warn("[heartbeat] non-ok", r.status);
+                sendFallbackSignal();
                 return;
             }
             let data = null;
@@ -119,6 +144,7 @@
             applyServerState(data);
         } catch (err) {
             console.warn("heartbeat failed", err);
+            sendFallbackSignal();
             // Network-level failure (offline, DNS, etc.) — but don't yank the
             // KPI to "Offline" on a single dropped request; let the watchdog
             // retry. We only mark explicit offline on lock-screen / pagehide.
@@ -259,6 +285,7 @@
                     if (ok) console.log("[heartbeat] tick ok", e.data);
                     else console.warn("[heartbeat] tick failed", e.data);
                 }
+                if (!ok) sendFallbackSignal();
             };
             w.onerror = (err) => {
                 if (DEBUG) console.error("[heartbeat] worker error", err);
@@ -879,9 +906,7 @@
     //   * userState   = "active" | "idle"       -> no input across all apps
     //
     // Policy applied here:
-    //   IF screenState === locked              -> OFFLINE  (clear LastSeen)
-    //   ELSE IF userState === idle (15+ min)   -> AWAY     (still online,
-    //                                                       just paused)
+    //   IF screenState === locked              -> OFFLINE
     //   ELSE                                   -> ONLINE
     //
     // Critically: minimizing the browser, switching tabs, and working in
@@ -907,9 +932,8 @@
         // intentionally ignored — being away from the keyboard while the
         // screen is still unlocked still counts as Online.
         if (detector.screenState === "locked") {
-            // Locked workstation → explicitly offline. Clear LastSeen on
-            // the server so the dashboard flips immediately instead of
-            // waiting for the heartbeat threshold to age out.
+            // Locked workstation → explicitly offline. LastSeen remains the
+            // latest successful signal for dashboard history.
             if (currentState !== "offline") {
                 stopTimers();
                 currentState = "offline";

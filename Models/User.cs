@@ -277,29 +277,23 @@ public class User
 
     /// <summary>
     /// True when the user is considered online for dashboard display.
-    /// Policy: a logged-in user is Online unless their stored
-    /// <see cref="PresenceState"/> is <c>"offline"</c> (which the client
-    /// only sets when Windows locks, on logout, or on tab close), or
-    /// <see cref="LastSeen"/> is null (never seen). The
-    /// <paramref name="thresholdSeconds"/> parameter is accepted for
-    /// backwards compatibility but no longer participates in the
-    /// decision — stale heartbeats do not mark the user offline.
+    /// Explicit offline transitions take effect immediately. A user also
+    /// becomes offline when every primary and fallback presence signal has
+    /// been missing for <paramref name="thresholdSeconds"/>.
     /// </summary>
     public bool IsOnline(int thresholdSeconds = 60)
     {
-        if (LastSeen is null) return false;
-        return !string.Equals(PresenceState, "offline", StringComparison.OrdinalIgnoreCase);
+        return EffectiveState(thresholdSeconds) != "offline";
     }
 
     /// <summary>
     /// Computes the effective presence state for dashboard rendering.
     /// Returns "online", "lunch", or "offline".
     /// <para>
-    /// Policy: a user shows as <c>"offline"</c> only when the client has
-    /// reported a locked workstation (or browser-close / logout), or
-    /// <see cref="LastSeen"/> is null. A stale heartbeat alone is NOT
-    /// enough to display the user as offline — the dashboard trusts the
-    /// stored <see cref="PresenceState"/>. Lunch auto-expires
+    /// Policy: a user shows as <c>"offline"</c> when the client reports a
+    /// locked workstation (or browser-close / logout), when no presence
+    /// has ever been observed, or after all presence signals exceed the
+    /// configured timeout. Lunch auto-expires
     /// <see cref="Constants.LunchBreakMinutes"/> minutes after
     /// <see cref="LunchStartedAt"/>.
     /// </para>
@@ -309,26 +303,75 @@ public class User
     public string EffectiveState(int thresholdSeconds = 60)
     {
         if (LastSeen is null) return "offline";
+
+        if (PresenceState == "lunch" && IsLunchActive()) return "lunch";
+        if (PresenceState == "break" && IsBreakActive()) return "break";
+        if (string.Equals(PresenceState, "offline", StringComparison.OrdinalIgnoreCase))
+            return "offline";
+
+        var seenUtc = DateTime.SpecifyKind(LastSeen.Value, DateTimeKind.Utc);
+        if (DateTime.UtcNow - seenUtc > TimeSpan.FromSeconds(Math.Max(1, thresholdSeconds)))
+            return "offline";
+
         return PresenceState switch
         {
-            "lunch"   => IsLunchActive() ? "lunch" : "online",
-            "break"   => IsBreakActive() ? "break" : "online",
-            "offline" => "offline",
+            "lunch"   => "online",
+            "break"   => "online",
             _         => "online", // "online", legacy "away", or anything else
         };
     }
 
     /// <summary>
-    /// Computes dashboard presence while requiring an active clock-in.
-    /// Once clocked in, the heartbeat-managed presence state is the source
-    /// of truth so employee and manager dashboards cannot disagree merely
-    /// because the original login is older than a fixed duration.
+    /// Returns the UTC start of the user's current effective offline period.
+    /// Explicit transitions use <see cref="OfflineSince"/>. If every client
+    /// presence signal stops, the period starts when the heartbeat timeout
+    /// expires. Active lunch and short-break windows are never treated as
+    /// offline.
+    /// </summary>
+    public DateTime? EffectiveOfflineSince(DateTime nowUtc, int thresholdSeconds)
+    {
+        nowUtc = DateTime.SpecifyKind(nowUtc, DateTimeKind.Utc);
+
+        if (PresenceState == "lunch" && IsLunchActive()) return null;
+        if (PresenceState == "break" && IsBreakActive()) return null;
+
+        if (string.Equals(PresenceState, "offline", StringComparison.OrdinalIgnoreCase))
+        {
+            var explicitStart = OfflineSince ?? LastSeen;
+            return explicitStart is null
+                ? null
+                : DateTime.SpecifyKind(explicitStart.Value, DateTimeKind.Utc);
+        }
+
+        if (LastSeen is not { } seen) return null;
+        var staleStart = DateTime.SpecifyKind(seen, DateTimeKind.Utc)
+            .AddSeconds(Math.Max(1, thresholdSeconds));
+
+        if (PresenceState == "lunch" && LunchStartedAt is { } lunchStart)
+        {
+            var lunchEnd = DateTime.SpecifyKind(lunchStart, DateTimeKind.Utc)
+                .AddMinutes(Constants.LunchBreakMinutes);
+            if (lunchEnd > staleStart) staleStart = lunchEnd;
+        }
+        else if (PresenceState == "break" && BreakStartedAt is { } breakStart)
+        {
+            var breakEnd = DateTime.SpecifyKind(breakStart, DateTimeKind.Utc)
+                .AddMinutes(Constants.ShortBreakMinutes);
+            if (breakEnd > staleStart) staleStart = breakEnd;
+        }
+
+        return staleStart <= nowUtc ? staleStart : null;
+    }
+
+    /// <summary>
+    /// Computes presence for dashboard rendering. Attendance is deliberately
+    /// independent: a logged-in employee remains online before check-in and
+    /// after checkout while browser presence signals are still arriving.
     /// </summary>
     public string EffectiveDashboardState(
         Attendance? attendance,
         int thresholdSeconds = 60)
     {
-        if (attendance is null || !attendance.IsOpen) return "offline";
         return EffectiveState(thresholdSeconds);
     }
 

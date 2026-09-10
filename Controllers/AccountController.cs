@@ -15,7 +15,14 @@ namespace AttendanceMonitoring.Controllers;
 
 public class AccountController : AppController
 {
-    public AccountController(AppDbContext db) : base(db) { }
+    private readonly int _onlineThreshold;
+
+    public AccountController(AppDbContext db, IConfiguration config) : base(db)
+    {
+        _onlineThreshold = config.GetValue(
+            "AttendanceMonitoring:OnlineThresholdSeconds",
+            Constants.DefaultOnlineThresholdSeconds);
+    }
 
     [HttpGet]
     public IActionResult Login(string? returnUrl = null)
@@ -99,9 +106,10 @@ public class AccountController : AppController
         // name; capturing the UA is the most we can do server-side.
         user.LastLoginAgent = ClientInfo.GetAgentLabel(HttpContext);
         user.LastLoginAt = DateTime.UtcNow;
-        user.LastSeen = DateTime.UtcNow;
+        var nowUtc = DateTime.UtcNow;
         await PresenceTracker.MarkPresentAsync(
-            Db, user, "online", "login", DateTime.UtcNow);
+            Db, user, "online", "login", nowUtc, _onlineThreshold);
+        user.LastSeen = nowUtc;
         await Db.SaveChangesAsync();
 
         TempData.Flash($"Welcome back, {user.FullName}!", "success");

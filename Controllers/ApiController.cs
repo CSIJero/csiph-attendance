@@ -21,6 +21,13 @@ namespace AttendanceMonitoring.Controllers;
 [IgnoreAntiforgeryToken]
 public class ApiController : ControllerBase
 {
+    private static readonly byte[] TransparentPixel =
+    [
+        71, 73, 70, 56, 57, 97, 1, 0, 1, 0, 128, 0, 0, 0, 0, 0,
+        255, 255, 255, 33, 249, 4, 1, 0, 0, 0, 0, 44, 0, 0, 0, 0,
+        1, 0, 1, 0, 0, 2, 2, 68, 1, 0, 59,
+    ];
+
     private readonly AppDbContext _db;
     private readonly int _onlineThreshold;
 
@@ -53,7 +60,7 @@ public class ApiController : ControllerBase
         if (!TryNormalizeHeartbeatState(body?.State, out var clientState))
             return BadRequest(new { error = "State must be online, away, or offline." });
 
-        u.LastSeen = DateTime.UtcNow;
+        var nowUtc = DateTime.UtcNow;
 
         // Lunch wins over any client-reported state until it expires. The
         // client-side toggle is one-way (start/end) so the heartbeat label
@@ -89,15 +96,16 @@ public class ApiController : ControllerBase
                 _db,
                 u,
                 null,
-                DateTime.UtcNow,
+                nowUtc,
                 preserveExistingReason: true);
         }
         else
         {
             await PresenceTracker.MarkPresentAsync(
-                _db, u, u.PresenceState, "heartbeat", DateTime.UtcNow);
+                _db, u, u.PresenceState, "heartbeat", nowUtc, _onlineThreshold);
         }
 
+        u.LastSeen = nowUtc;
         await _db.SaveChangesAsync();
 
         return new JsonResult(new
@@ -112,6 +120,71 @@ public class ApiController : ControllerBase
             lunches_used = LunchesUsedTodayPh(u),
             lunches_max = Models.Constants.MaxLunchesPerDay,
         });
+    }
+
+    /// <summary>
+    /// Independent presence signal used when the JSON heartbeat endpoint or
+    /// the browser's fetch pipeline is blocked. An image request uses a
+    /// different URL and transport while retaining the authenticated cookie.
+    /// </summary>
+    [HttpGet("/session/pulse.gif")]
+    [EnableRateLimiting("Heartbeat")]
+    [ResponseCache(Location = ResponseCacheLocation.None, NoStore = true)]
+    public async Task<IActionResult> PresencePulse([FromQuery] long? t)
+    {
+        var raw = User.FindFirst(
+            System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
+        if (!int.TryParse(raw, out var id)) return Unauthorized();
+
+        var u = await _db.Users.FirstOrDefaultAsync(x => x.Id == id);
+        if (u is null) return Unauthorized();
+
+        var nowUtc = DateTime.UtcNow;
+        DateTime? signalUtc = null;
+        if (t is >= 0)
+        {
+            try
+            {
+                signalUtc = DateTimeOffset.FromUnixTimeMilliseconds(t.Value).UtcDateTime;
+            }
+            catch (ArgumentOutOfRangeException)
+            {
+                // Invalid timestamps cannot recover an explicit offline state.
+            }
+        }
+
+        if (string.Equals(
+                u.PresenceState,
+                "offline",
+                StringComparison.OrdinalIgnoreCase)
+            && !string.Equals(
+                u.PresenceReason,
+                "heartbeat_timeout",
+                StringComparison.OrdinalIgnoreCase))
+        {
+            var offlineSince = u.OfflineSince is { } value
+                ? DateTime.SpecifyKind(value, DateTimeKind.Utc)
+                : (DateTime?)null;
+            if (signalUtc is null
+                || (offlineSince is { } started && signalUtc <= started))
+            {
+                return File(TransparentPixel, "image/gif");
+            }
+        }
+
+        var state = u.PresenceState switch
+        {
+            "lunch" when u.IsLunchActive() => "lunch",
+            "break" when u.IsBreakActive() => "break",
+            _ => "online",
+        };
+
+        await PresenceTracker.MarkPresentAsync(
+            _db, u, state, "fallback_signal", nowUtc, _onlineThreshold);
+        u.LastSeen = nowUtc;
+        await _db.SaveChangesAsync();
+
+        return File(TransparentPixel, "image/gif");
     }
 
     private static DateTime? LunchEndsAt(Models.User u)
@@ -212,9 +285,10 @@ public class ApiController : ControllerBase
 
         u.LunchesUsedToday += 1;
         u.LunchStartedAt = DateTime.UtcNow;
-        u.LastSeen = DateTime.UtcNow;
+        var nowUtc = DateTime.UtcNow;
         await PresenceTracker.MarkPresentAsync(
-            _db, u, "lunch", "lunch_started", DateTime.UtcNow);
+            _db, u, "lunch", "lunch_started", nowUtc, _onlineThreshold);
+        u.LastSeen = nowUtc;
         await _db.SaveChangesAsync();
 
         return new JsonResult(new
@@ -237,9 +311,10 @@ public class ApiController : ControllerBase
         if (u is null) return Unauthorized();
 
         u.LunchStartedAt = null;
-        u.LastSeen = DateTime.UtcNow;
+        var nowUtc = DateTime.UtcNow;
         await PresenceTracker.MarkPresentAsync(
-            _db, u, "online", "lunch_ended", DateTime.UtcNow);
+            _db, u, "online", "lunch_ended", nowUtc, _onlineThreshold);
+        u.LastSeen = nowUtc;
         await _db.SaveChangesAsync();
 
         return new JsonResult(new
@@ -289,9 +364,10 @@ public class ApiController : ControllerBase
 
         u.BreaksUsedToday += 1;
         u.BreakStartedAt = DateTime.UtcNow;
-        u.LastSeen = DateTime.UtcNow;
+        var nowUtc = DateTime.UtcNow;
         await PresenceTracker.MarkPresentAsync(
-            _db, u, "break", "break_started", DateTime.UtcNow);
+            _db, u, "break", "break_started", nowUtc, _onlineThreshold);
+        u.LastSeen = nowUtc;
         await _db.SaveChangesAsync();
 
         return new JsonResult(new
@@ -314,9 +390,10 @@ public class ApiController : ControllerBase
         if (u is null) return Unauthorized();
 
         u.BreakStartedAt = null;
-        u.LastSeen = DateTime.UtcNow;
+        var nowUtc = DateTime.UtcNow;
         await PresenceTracker.MarkPresentAsync(
-            _db, u, "online", "break_ended", DateTime.UtcNow);
+            _db, u, "online", "break_ended", nowUtc, _onlineThreshold);
+        u.LastSeen = nowUtc;
         await _db.SaveChangesAsync();
 
         return new JsonResult(new
@@ -490,7 +567,8 @@ public class ApiController : ControllerBase
                     UserClock.TodayFor(u),
                     presenceIntervals,
                     presenceNowUtc,
-                    attendanceRows),
+                    attendanceRows,
+                    _onlineThreshold),
                 lunch_ends_at = state == "lunch" ? LunchEndsAt(u)?.ToString("o") : null,
                 break_ends_at = state == "break" ? BreakEndsAt(u)?.ToString("o") : null,
                 checked_in = att is not null,
