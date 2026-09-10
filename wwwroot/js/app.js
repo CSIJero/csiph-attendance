@@ -399,7 +399,7 @@
                 .replaceAll("_", " ");
             const reasonAt = u.presence_reason === "logout"
                 ? u.logout_at
-                : ["locked", "browser_closed"].includes(u.presence_reason)
+                : ["locked", "browser_closed", "page_hidden"].includes(u.presence_reason)
                     ? u.offline_since
                     : null;
             const timestamp = reasonAt ? ` ${fmtTime(reasonAt)}` : "";
@@ -816,6 +816,7 @@
         if (heartbeatTimer !== null) { clearInterval(heartbeatTimer); heartbeatTimer = null; }
         if (refreshTimer !== null) { clearInterval(refreshTimer); refreshTimer = null; }
         if (offlineForTimer !== null) { clearInterval(offlineForTimer); offlineForTimer = null; }
+        if (watchdogTimer !== null) { clearInterval(watchdogTimer); watchdogTimer = null; }
     }
 
     // -------------------------------------------------------------------
@@ -866,28 +867,14 @@
     startTimers();
     requestPreciseLocationOnce();
 
-    // Tab hidden (minimize / switch tab / Windows lock screen): keep the
-    // heartbeat running so a minimized browser still counts as "online".
-    // The cadence ticks come from a dedicated Web Worker which is far
-    // less throttled than the main thread on hidden tabs. We also send
-    // an immediate "anchor" heartbeat the moment we go hidden so the
-    // server records LastSeen at the minimize instant — that closes the
-    // gap where browser throttling could otherwise delay the next tick
-    // past the OnlineThresholdSeconds window and briefly flash the user
-    // as offline on the admin dashboard.
+    // Switching tabs, minimizing, or moving to another application does not
+    // change presence. Keep heartbeats running while hidden and send an
+    // immediate update when the page becomes visible again.
     document.addEventListener("visibilitychange", () => {
         if (document.visibilityState === "visible") {
-            // Coming back to the foreground: refresh immediately so the
-            // dashboard catches up without waiting for the next tick.
-            if (DEBUG) console.log("[heartbeat] visible → ping + restart timers");
+            if (DEBUG) console.log("[heartbeat] visible -> ping");
             pingHeartbeat();
             refreshDashboard();
-            startTimers();
-        } else if (document.visibilityState === "hidden") {
-            // Anchor LastSeen to "now" so the worker's next throttled
-            // tick has plenty of headroom under the server threshold.
-            if (DEBUG) console.log("[heartbeat] hidden → anchor ping");
-            pingHeartbeat();
         }
     });
 
@@ -909,12 +896,6 @@
     //   IF screenState === locked              -> OFFLINE
     //   ELSE                                   -> ONLINE
     //
-    // Critically: minimizing the browser, switching tabs, and working in
-    // another app do NOT flip state -- those are all still "online" because
-    // the heartbeat (Web Worker) keeps firing and the Idle Detection API
-    // reports userState=active as long as there's keyboard/mouse activity
-    // anywhere on the OS.
-    //
     // Requires HTTPS + a user gesture to request permission. When the API
     // is unavailable or denied, we stay in "online" mode and rely on the
     // server's LastSeen-aging fallback.
@@ -932,14 +913,14 @@
         // intentionally ignored — being away from the keyboard while the
         // screen is still unlocked still counts as Online.
         if (detector.screenState === "locked") {
-            // Locked workstation → explicitly offline. LastSeen remains the
-            // latest successful signal for dashboard history.
+            // Always report the specific lock reason, even if an older client
+            // or another event already set a generic offline state.
             if (currentState !== "offline") {
                 stopTimers();
                 currentState = "offline";
                 setSelfDot("offline");
-                sendOffline("locked", false);
             }
+            sendOffline("locked", false);
         } else {
             // Screen unlocked → Online. Resume timers if we were offline.
             if (currentState === "offline") startTimers();

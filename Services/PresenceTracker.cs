@@ -26,6 +26,12 @@ public static class PresenceTracker
     {
         nowUtc = AsUtc(nowUtc);
         var normalizedReason = NormalizeOfflineReason(reason);
+        if (normalizedReason == "page_hidden"
+            && user.PresenceState == "offline"
+            && user.PresenceReason is "logout" or "locked" or "browser_closed")
+        {
+            normalizedReason = user.PresenceReason;
+        }
         var intervalReason = preserveExistingReason
             ? NormalizeOfflineReason(user.PresenceReason)
             : normalizedReason;
@@ -48,6 +54,17 @@ public static class PresenceTracker
             ON CONFLICT DO NOTHING
             """,
             cancellationToken);
+
+        if (!preserveExistingReason)
+        {
+            await db.Database.ExecuteSqlInterpolatedAsync(
+                $"""
+                UPDATE presence_intervals
+                SET "Reason" = {normalizedReason}
+                WHERE "UserId" = {user.Id} AND "EndedAt" IS NULL
+                """,
+                cancellationToken);
+        }
     }
 
     public static async Task MarkPresentAsync(

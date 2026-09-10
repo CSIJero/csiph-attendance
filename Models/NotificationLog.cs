@@ -39,6 +39,10 @@ public class NotificationLog
     /// <summary>How long the user had been offline at send time (minutes).</summary>
     public int OfflineMinutes { get; set; }
 
+    /// <summary>Snapshot of why the user went offline.</summary>
+    [MaxLength(32)]
+    public string? OfflineReason { get; set; }
+
     /// <summary>Set when <see cref="Status"/> is "Failed".</summary>
     [MaxLength(2048)]
     public string? ErrorMessage { get; set; }

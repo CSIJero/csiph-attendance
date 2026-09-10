@@ -65,9 +65,10 @@ public class ApiController : ControllerBase
         // Lunch wins over any client-reported state until it expires. The
         // client-side toggle is one-way (start/end) so the heartbeat label
         // shouldn't accidentally flip the state mid-break.
-        if (u.PresenceState == "lunch" && u.IsLunchActive())
+        if (u.IsLunchActive())
         {
-            // Stay on lunch — ignore the client's "online/away" ticks.
+            // Restore lunch after a temporary page-hidden offline state.
+            u.PresenceState = "lunch";
         }
         else if (u.PresenceState == "lunch")
         {
@@ -75,9 +76,10 @@ public class ApiController : ControllerBase
             u.LunchStartedAt = null;
             u.PresenceState = clientState;
         }
-        else if (u.PresenceState == "break" && u.IsBreakActive())
+        else if (u.IsBreakActive())
         {
-            // Stay on break — same idea as lunch above.
+            // Restore break after a temporary page-hidden offline state.
+            u.PresenceState = "break";
         }
         else if (u.PresenceState == "break")
         {

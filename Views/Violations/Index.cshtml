@@ -213,6 +213,7 @@
                             <th data-sort-type="date">Detected</th>
                             <th>Employee</th>
                             <th data-sort-type="num">Offline for</th>
+                            <th>Reason</th>
                             <th>Email status</th>
                             <th data-no-sort>Thread</th>
                             <th data-no-sort>@(Model.IsReadOnly ? "Decision" : "Action")</th>
@@ -234,7 +235,7 @@
                                            data-group="@groupId"
                                            title="Select / deselect all in @groupLabel" />
                                 </td>
-                                <td colspan="6">
+                                <td colspan="7">
                                     <strong>@groupLabel</strong>
                                     <small class="muted"> &middot; @groupCount reminder@(groupCount == 1 ? "" : "s")</small>
                                 </td>
@@ -248,6 +249,14 @@
                                     : $"{mins}m";
                                 var detectedSort = ToViewerLocal(n.SentAt).ToString("yyyy-MM-ddTHH:mm:ss");
                                 var employeeSort = (n.UserFullName ?? n.Username ?? "").ToLowerInvariant();
+                                var reasonLabel = n.OfflineReason switch
+                                {
+                                    "logout" => "Logged out",
+                                    "browser_closed" => "Browser closed",
+                                    "locked" => "Workstation locked",
+                                    "page_hidden" => "Tab/window hidden",
+                                    _ => "Unknown",
+                                };
                                 var statusSort = (n.Status ?? "").ToLowerInvariant();
                                 var actionTaken = n.ActionTaken ?? string.Empty;
                                 var rowIsPending = string.IsNullOrWhiteSpace(actionTaken);
@@ -275,6 +284,7 @@
                                         <small class="muted">@(n.Username ?? "")</small>
                                     </td>
                                     <td data-sort="@n.OfflineMinutes">@offlineLabel</td>
+                                    <td data-sort="@reasonLabel.ToLowerInvariant()">@reasonLabel</td>
                                     <td data-sort="@statusSort">
                                         <small class="muted">@n.Status</small>
                                         @if (!string.IsNullOrWhiteSpace(n.ErrorMessage))

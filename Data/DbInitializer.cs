@@ -66,6 +66,7 @@ public static class DbInitializer
         await EnsureScheduleAmendmentsTableAsync(db);
         await EnsureQuotaResetRequestsTableAsync(db);
         await EnsureNotificationLogActionColumnsAsync(db);
+        await EnsureNotificationLogReasonColumnAsync(db);
 
         // Convert any legacy DateOnly columns that earlier deploys created
         // as TEXT on Postgres over to native DATE. EF Core 8 maps DateOnly
@@ -1842,6 +1843,24 @@ public static class DbInitializer
                 "CREATE INDEX IF NOT EXISTS IX_users_IsActive ON users(IsActive);");
         }
         catch { /* old SQLite without IF NOT EXISTS — ignore */ }
+    }
+
+    private static async Task EnsureNotificationLogReasonColumnAsync(AppDbContext db)
+    {
+        if (db.Database.IsNpgsql())
+        {
+            await db.Database.ExecuteSqlRawAsync(
+                "ALTER TABLE notification_log ADD COLUMN IF NOT EXISTS \"OfflineReason\" VARCHAR(32) NULL;");
+            return;
+        }
+
+        if (!db.Database.IsSqlite()) return;
+        var existing = await GetColumnsAsync(db, "notification_log");
+        if (!existing.Contains("OfflineReason"))
+        {
+            await db.Database.ExecuteSqlRawAsync(
+                "ALTER TABLE notification_log ADD COLUMN OfflineReason TEXT NULL;");
+        }
     }
 
     private static async Task EnsureUserFaceColumnsAsync(AppDbContext db)

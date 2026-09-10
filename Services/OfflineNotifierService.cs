@@ -712,6 +712,7 @@ public class OfflineNotifierService : BackgroundService
             Recipients = joined,
             Subject = subject.Length > 255 ? subject[..255] : subject,
             OfflineMinutes = offlineMinutes,
+            OfflineReason = u.PresenceReason,
             ErrorMessage = msg,
         });
         await db.SaveChangesAsync(ct);
