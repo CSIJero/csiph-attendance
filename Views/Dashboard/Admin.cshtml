@@ -334,18 +334,18 @@
                         <td>
                             <span class="dot dot-@row.State"
                                   data-cell="dot"
-                                  title="@row.User.PresenceReason"></span>
+                                  title="@row.PresenceReason"></span>
                             <span data-cell="status-text">@stateLabel</span>
                             <small class="muted"
                                    data-cell="presence-reason"
                                    hidden="@(row.State != "offline")">
-                                @row.User.PresenceReason.Replace('_', ' ')
-                                @if (row.User.PresenceReason == "logout"
+                                @row.PresenceReason.Replace('_', ' ')
+                                @if (row.PresenceReason == "logout"
                                      && row.User.LogoutAt is { } logoutAt)
                                 {
                                     <text>@UserClock.Format(viewer, logoutAt, "yyyy-MM-dd HH:mm") @tz</text>
                                 }
-                                else if (row.User.PresenceReason is "locked" or "browser_closed"
+                                else if (row.PresenceReason is "locked" or "inactive" or "browser_closed" or "heartbeat_timeout"
                                          && row.User.OfflineSince is { } offlineSince)
                                 {
                                     <text>@UserClock.Format(viewer, offlineSince, "yyyy-MM-dd HH:mm") @tz</text>

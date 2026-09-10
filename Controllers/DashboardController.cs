@@ -190,6 +190,9 @@ public class DashboardController : AppController
                 User = u,
                 Online = isOnline,
                 State = state,
+                PresenceReason = u.EffectivePresenceReason(
+                    presenceNowUtc,
+                    _onlineThreshold),
                 Attendance = att,
                 TodaySchedule = sched,
                 Late = late,

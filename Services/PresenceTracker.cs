@@ -10,6 +10,7 @@ public static class PresenceTracker
     [
         "logout",
         "locked",
+        "inactive",
         "page_hidden",
         "browser_closed",
         "heartbeat_timeout",
@@ -145,7 +146,8 @@ public static class PresenceTracker
         }
 
         var userIntervals = intervals
-            .Where(interval => interval.UserId == user.Id)
+            .Where(interval => interval.UserId == user.Id
+                && Constants.IsTrackedOfflineReason(interval.Reason))
             .ToList();
         var offlineWindows = userIntervals
             .Select(interval =>
@@ -163,9 +165,9 @@ public static class PresenceTracker
             .ToList();
 
         if (!userIntervals.Any(interval => interval.EndedAt == null)
-            && user.EffectiveOfflineSince(nowUtc, offlineThresholdSeconds) is { } inferredStart)
+            && user.EffectiveOfflineSince(nowUtc, offlineThresholdSeconds) is { } explicitStart)
         {
-            var clippedStart = inferredStart > startUtc ? inferredStart : startUtc;
+            var clippedStart = explicitStart > startUtc ? explicitStart : startUtc;
             var clippedEnd = nowUtc < endUtc ? nowUtc : endUtc;
             if (clippedEnd > clippedStart)
             {

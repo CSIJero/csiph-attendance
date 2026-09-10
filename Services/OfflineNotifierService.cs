@@ -8,13 +8,6 @@ namespace AttendanceMonitoring.Services;
 
 public class OfflineNotifierService : BackgroundService
 {
-    private static readonly HashSet<string> NotifiableOfflineReasons =
-    [
-        "locked",
-        "logout",
-        "browser_closed",
-    ];
-
     private enum AlertLevel
     {
         None = 0,
@@ -337,10 +330,10 @@ public class OfflineNotifierService : BackgroundService
                 ? PresenceTracker.NormalizeOfflineReason(u.PresenceReason)
                 : "heartbeat_timeout";
 
-            // Hidden/minimized tabs remain an attendance signal but must not
-            // produce employee or manager emails. Only explicit workstation
-            // lock, logout, and browser-close transitions are actionable.
-            if (!NotifiableOfflineReasons.Contains(offlineReason)) continue;
+            // Hidden/minimized tabs and transport loss remain attendance
+            // signals. Lock, inactivity, logout, and browser close are the
+            // only actionable offline transitions.
+            if (!Constants.IsTrackedOfflineReason(offlineReason)) continue;
 
             var lastSeenUtc = u.LastSeen is { } seen
                 ? DateTime.SpecifyKind(seen, DateTimeKind.Utc)

@@ -17,6 +17,17 @@ public static class Constants
     /// <summary>How many seconds since last heartbeat counts as "online".</summary>
     public const int DefaultOnlineThresholdSeconds = 60;
 
+    /// <summary>
+    /// Reasons that represent an intentional, reportable offline transition.
+    /// Transport loss and page visibility changes do not count as offline.
+    /// </summary>
+    public static bool IsTrackedOfflineReason(string? reason) =>
+        reason is not null
+        && (reason.Equals("locked", StringComparison.OrdinalIgnoreCase)
+            || reason.Equals("logout", StringComparison.OrdinalIgnoreCase)
+            || reason.Equals("browser_closed", StringComparison.OrdinalIgnoreCase)
+            || reason.Equals("inactive", StringComparison.OrdinalIgnoreCase));
+
     /// <summary>Maximum age of a login session that can still appear online.</summary>
     public const int MaximumOnlineLoginHours = 8;
 

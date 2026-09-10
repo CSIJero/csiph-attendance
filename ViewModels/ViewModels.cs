@@ -74,6 +74,8 @@ public class TeamRowViewModel
     public bool Online { get; set; }
     /// <summary>"online" | "away" | "offline" – derived presence state.</summary>
     public string State { get; set; } = "offline";
+    /// <summary>Reason corresponding to the derived presence state.</summary>
+    public string PresenceReason { get; set; } = "never_seen";
     public Attendance? Attendance { get; set; }
     /// <summary>Today's schedule row (PHT calendar date); null when no row exists.</summary>
     public ScheduleEntry? TodaySchedule { get; set; }

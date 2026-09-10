@@ -290,10 +290,11 @@ public class User
     /// Computes the effective presence state for dashboard rendering.
     /// Returns "online", "lunch", or "offline".
     /// <para>
-    /// Policy: a user shows as <c>"offline"</c> when the client reports a
-    /// locked workstation (or browser-close / logout), when no presence
-    /// has ever been observed, or after all presence signals exceed the
-    /// configured timeout. Lunch auto-expires
+    /// Policy: outside an open shift a user shows as <c>"offline"</c> when
+    /// the client reports an explicit transition, when no presence has ever
+    /// been observed, or after all presence signals exceed the configured
+    /// timeout. During an open shift, <see cref="EffectiveDashboardState"/>
+    /// restricts Offline to tracked reasons. Lunch auto-expires
     /// <see cref="Constants.LunchBreakMinutes"/> minutes after
     /// <see cref="LunchStartedAt"/>.
     /// </para>
@@ -335,32 +336,15 @@ public class User
         if (PresenceState == "lunch" && IsLunchActive()) return null;
         if (PresenceState == "break" && IsBreakActive()) return null;
 
-        if (string.Equals(PresenceState, "offline", StringComparison.OrdinalIgnoreCase))
+        if (string.Equals(PresenceState, "offline", StringComparison.OrdinalIgnoreCase)
+            && Constants.IsTrackedOfflineReason(PresenceReason))
         {
             var explicitStart = OfflineSince ?? LastSeen;
             return explicitStart is null
                 ? null
                 : DateTime.SpecifyKind(explicitStart.Value, DateTimeKind.Utc);
         }
-
-        if (LastSeen is not { } seen) return null;
-        var staleStart = DateTime.SpecifyKind(seen, DateTimeKind.Utc)
-            .AddSeconds(Math.Max(1, thresholdSeconds));
-
-        if (PresenceState == "lunch" && LunchStartedAt is { } lunchStart)
-        {
-            var lunchEnd = DateTime.SpecifyKind(lunchStart, DateTimeKind.Utc)
-                .AddMinutes(Constants.LunchBreakMinutes);
-            if (lunchEnd > staleStart) staleStart = lunchEnd;
-        }
-        else if (PresenceState == "break" && BreakStartedAt is { } breakStart)
-        {
-            var breakEnd = DateTime.SpecifyKind(breakStart, DateTimeKind.Utc)
-                .AddMinutes(Constants.ShortBreakMinutes);
-            if (breakEnd > staleStart) staleStart = breakEnd;
-        }
-
-        return staleStart <= nowUtc ? staleStart : null;
+        return null;
     }
 
     /// <summary>
@@ -372,7 +356,35 @@ public class User
         Attendance? attendance,
         int thresholdSeconds = 60)
     {
-        return EffectiveState(thresholdSeconds);
+        var state = EffectiveState(thresholdSeconds);
+        if (attendance?.IsOpen == true
+            && state == "offline"
+            && !Constants.IsTrackedOfflineReason(PresenceReason))
+        {
+            return "online";
+        }
+        return state;
+    }
+
+    /// <summary>
+    /// Returns the reason that explains the effective dashboard state.
+    /// A fallback pulse is an online transport, not an offline reason; once
+    /// that pulse becomes stale the effective reason is heartbeat timeout.
+    /// </summary>
+    public string EffectivePresenceReason(
+        DateTime nowUtc,
+        int thresholdSeconds = 60)
+    {
+        nowUtc = DateTime.SpecifyKind(nowUtc, DateTimeKind.Utc);
+
+        if (LastSeen is null) return "never_seen";
+        if (string.Equals(PresenceState, "offline", StringComparison.OrdinalIgnoreCase))
+            return PresenceReason;
+
+        var seenUtc = DateTime.SpecifyKind(LastSeen.Value, DateTimeKind.Utc);
+        return nowUtc - seenUtc > TimeSpan.FromSeconds(Math.Max(1, thresholdSeconds))
+            ? "heartbeat_timeout"
+            : PresenceReason;
     }
 
     /// <summary>True when lunch was started within the past

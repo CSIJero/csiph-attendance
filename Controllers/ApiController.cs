@@ -560,9 +560,13 @@ public class ApiController : ControllerBase
                 business_unit = u.BusinessUnit,
                 online = isOnline,
                 state,
-                presence_reason = u.PresenceReason,
+                presence_reason = u.EffectivePresenceReason(
+                    presenceNowUtc,
+                    _onlineThreshold),
                 logout_at = u.LogoutAt?.ToString("o"),
-                offline_since = u.OfflineSince?.ToString("o"),
+                offline_since = u.EffectiveOfflineSince(
+                    presenceNowUtc,
+                    _onlineThreshold)?.ToString("o"),
                 last_seen = u.EffectiveLastSeen.ToString("o"),
                 offline_seconds_today = PresenceTracker.OfflineSecondsForDate(
                     u,

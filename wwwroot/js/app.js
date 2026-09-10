@@ -2,15 +2,16 @@
 (function () {
     const HEARTBEAT_MS = 15000;   // tell server we're online every 15s
     const REFRESH_MS = 15000;     // re-fetch dashboard data every 15s
-    const IDLE_THRESHOLD_MS = 15 * 60 * 1000;
+    const IDLE_THRESHOLD_MS = 5 * 60 * 1000;
     const DEBUG = true;           // log heartbeat lifecycle to the console
 
     // Client-tracked presence. Sent on every heartbeat so the server
     // knows whether the user is Online, on a break, or Offline (Windows
-    // locked / tab closing). Minimizing, switching tabs, and keyboard/mouse
-    // inactivity are not state changes.
+    // locked, tab closing, or five minutes without keyboard/mouse input).
+    // Minimizing and switching tabs are not state changes by themselves.
     // tabs is NOT a state change — the user is still "online".
     let currentState = "online";
+    let currentOfflineReason = null;
 
     // -----------------------------------------------------------------
     // Heartbeat-driven state mirrored from the server. These are kept at
@@ -101,6 +102,7 @@
             // countdown anchors so the KPI sub-text and button labels
             // don't keep dangling stale minutes.
             currentState = "online";
+            currentOfflineReason = null;
             lunchEndsAt = null;
             breakEndsAt = null;
         }
@@ -147,7 +149,8 @@
             sendFallbackSignal();
             // Network-level failure (offline, DNS, etc.) — but don't yank the
             // KPI to "Offline" on a single dropped request; let the watchdog
-            // retry. We only mark explicit offline on lock-screen / pagehide.
+            // retry. Offline transitions are reported separately for lock,
+            // inactivity, logout, and browser close.
         }
     }
 
@@ -399,7 +402,7 @@
                 .replaceAll("_", " ");
             const reasonAt = u.presence_reason === "logout"
                 ? u.logout_at
-                : ["locked", "browser_closed", "page_hidden"].includes(u.presence_reason)
+                : ["locked", "inactive", "browser_closed", "page_hidden"].includes(u.presence_reason)
                     ? u.offline_since
                     : null;
             const timestamp = reasonAt ? ` ${fmtTime(reasonAt)}` : "";
@@ -764,6 +767,7 @@
     }
 
     function sendOffline(reason, useBeacon) {
+        currentOfflineReason = reason;
         // sendBeacon survives tab close / navigation away; fall back to fetch.
         const payload = JSON.stringify({ reason });
         try {
@@ -820,12 +824,12 @@
     }
 
     // -------------------------------------------------------------------
-    // Presence policy: Online unless Windows is locked
+    // Presence policy: Online unless Windows is locked, the browser closes,
+    // the user logs out, or keyboard/mouse input is idle for five minutes.
     // -------------------------------------------------------------------
     // We treat the user as Online whenever a heartbeat is landing. There
     // is no "Away" tier — being away from the keyboard while the screen
-    // is still unlocked still counts as Online. The transitions out of
-    // Online are:
+    // The transitions out of Online are:
     //   - User starts Lunch  → "lunch"
     //   - Windows locks      → "offline" (HTTPS only, via IdleDetector)
     //   - Tab/browser closes → "offline" (best-effort beacon)
@@ -860,6 +864,47 @@
         }, 30000);
     }
     startWatchdog();
+
+    // Browser-observed keyboard and mouse activity provides an inactivity
+    // fallback when the system-wide Idle Detection API is unavailable.
+    // The Idle Detection API remains preferred because it observes input
+    // across applications, not only inside this browser page.
+    let lastInputAt = Date.now();
+    let inputInactivityTimer = null;
+
+    function markInactive() {
+        if (currentState === "lunch"
+            || currentState === "break"
+            || currentOfflineReason === "locked"
+            || currentOfflineReason === "logout"
+            || currentOfflineReason === "browser_closed") return;
+        if (currentState !== "offline" || currentOfflineReason !== "inactive") {
+            currentState = "offline";
+            currentOfflineReason = "inactive";
+            setSelfDot("offline");
+            sendOffline("inactive", false);
+            refreshDashboard();
+        }
+    }
+
+    function recordInputActivity() {
+        lastInputAt = Date.now();
+        if (currentState === "offline" && currentOfflineReason === "inactive") {
+            currentOfflineReason = null;
+            setState("online");
+            refreshDashboard();
+        }
+    }
+
+    for (const eventName of ["pointermove", "pointerdown", "keydown", "wheel", "touchstart"]) {
+        window.addEventListener(eventName, recordInputActivity, { passive: true });
+    }
+    inputInactivityTimer = setInterval(() => {
+        if (!idleDetector && Date.now() - lastInputAt >= IDLE_THRESHOLD_MS) {
+            markInactive();
+        }
+    }, 15000);
+
     // Kick things off
     heartbeatWorker = createHeartbeatWorker();
     sendHeartbeat();
@@ -893,7 +938,8 @@
     //   * userState   = "active" | "idle"       -> no input across all apps
     //
     // Policy applied here:
-    //   IF screenState === locked              -> OFFLINE
+    //   IF screenState === locked              -> OFFLINE (locked)
+    //   ELSE IF userState === idle             -> OFFLINE (inactive)
     //   ELSE                                   -> ONLINE
     //
     // Requires HTTPS + a user gesture to request permission. When the API
@@ -921,10 +967,16 @@
                 setSelfDot("offline");
             }
             sendOffline("locked", false);
+        } else if (detector.userState === "idle") {
+            markInactive();
         } else {
-            // Screen unlocked → Online. Resume timers if we were offline.
+            lastInputAt = Date.now();
+            // Screen unlocked with active input → Online.
             if (currentState === "offline") startTimers();
-            if (currentState !== "online") {
+            if (currentState === "offline"
+                && (currentOfflineReason === "locked"
+                    || currentOfflineReason === "inactive")) {
+                currentOfflineReason = null;
                 setState("online");
                 refreshDashboard();
             }
@@ -946,7 +998,7 @@
         try {
             const detector = new IdleDetector();
             detector.addEventListener("change", () => recomputeFromIdle(detector));
-            // 15-min idle threshold per policy. The API also fires
+            // Five-minute idle threshold per policy. The API also fires
             // screenState change events immediately on lock/unlock
             // regardless of this value.
             await detector.start({ threshold: IDLE_THRESHOLD_MS });
