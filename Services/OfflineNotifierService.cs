@@ -330,9 +330,8 @@ public class OfflineNotifierService : BackgroundService
                 ? PresenceTracker.NormalizeOfflineReason(u.PresenceReason)
                 : "heartbeat_timeout";
 
-            // Hidden/minimized tabs and transport loss remain attendance
-            // signals. Lock, inactivity, logout, and browser close are the
-            // only actionable offline transitions.
+            // Hidden/minimized tabs alone are not offline. Explicit client
+            // transitions and a sustained heartbeat timeout are actionable.
             if (!Constants.IsTrackedOfflineReason(offlineReason)) continue;
 
             var lastSeenUtc = u.LastSeen is { } seen

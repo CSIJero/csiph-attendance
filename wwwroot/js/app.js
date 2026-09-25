@@ -850,8 +850,7 @@
 
     // Always-on watchdog: a main-thread interval that fires every 30s
     // regardless of tab visibility. On hidden tabs Chromium will clamp
-    // this to ~1/min (intensive throttling), which is still well under
-    // the server's 5-min online threshold. This is the belt-and-suspenders
+    // this to ~1/min (intensive throttling). This is the belt-and-suspenders
     // path that keeps presence flowing even if the dedicated Web Worker
     // gets frozen or fails to start.
     let watchdogTimer = null;

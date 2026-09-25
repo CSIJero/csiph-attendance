@@ -157,7 +157,7 @@ Email__FromName=Attendance
 Email__Username=xkeysib-abc123...
 Email__Password=xkeysib-abc123...
 AttendanceMonitoring__RequireSecureCookie=true
-AttendanceMonitoring__OnlineThresholdSeconds=600
+AttendanceMonitoring__OnlineThresholdSeconds=60
 AttendanceMonitoring__SessionLifetimeHours=12
 ```
 

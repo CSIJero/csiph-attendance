@@ -68,7 +68,7 @@ Once deployment is created, go to **Environment Variables** and set:
 | `ASPNETCORE_URLS`                     | `http://0.0.0.0:10000`                     | Required (must bind to 0.0.0.0)            |
 | `ConnectionStrings__DefaultConnection` | (see Database Setup below)                 | SQLite or PostgreSQL connection string     |
 | `AttendanceMonitoring__RequireSecureCookie` | `true`                                | Enforces HTTPS cookies                     |
-| `AttendanceMonitoring__OnlineThresholdSeconds` | `600`                           | 10 minutes (adjust as needed)               |
+| `AttendanceMonitoring__OnlineThresholdSeconds` | `60`                            | 60 seconds (adjust as needed)                |
 | `AttendanceMonitoring__SessionLifetimeHours` | `12`                              | 12-hour sessions (adjust as needed)        |
 | `Email__Provider`                     | `Brevo`                                    | HTTP API (no SMTP block issues)             |
 | `Email__Enabled`                      | `true`                                     | Enable email functionality                 |

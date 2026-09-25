@@ -344,7 +344,12 @@ public class User
                 ? null
                 : DateTime.SpecifyKind(explicitStart.Value, DateTimeKind.Utc);
         }
-        return null;
+
+        if (LastSeen is null) return null;
+
+        var seenUtc = DateTime.SpecifyKind(LastSeen.Value, DateTimeKind.Utc);
+        var timeoutAt = seenUtc.AddSeconds(Math.Max(1, thresholdSeconds));
+        return nowUtc > timeoutAt ? timeoutAt : null;
     }
 
     /// <summary>
@@ -359,6 +364,10 @@ public class User
         var state = EffectiveState(thresholdSeconds);
         if (attendance?.IsOpen == true
             && state == "offline"
+            && string.Equals(
+                PresenceState,
+                "offline",
+                StringComparison.OrdinalIgnoreCase)
             && !Constants.IsTrackedOfflineReason(PresenceReason))
         {
             return "online";

@@ -72,7 +72,7 @@
   ASPNETCORE_URLS = http://0.0.0.0:10000
   ConnectionStrings__DefaultConnection = postgres://user:pass@host:5432/db
   AttendanceMonitoring__RequireSecureCookie = true
-  AttendanceMonitoring__OnlineThresholdSeconds = 600
+  AttendanceMonitoring__OnlineThresholdSeconds = 60
   AttendanceMonitoring__SessionLifetimeHours = 12
   Email__Provider = Brevo
   Email__Enabled = true
