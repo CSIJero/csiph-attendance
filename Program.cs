@@ -5,8 +5,10 @@ using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.AspNetCore.RateLimiting;
+using Microsoft.AspNetCore.ResponseCompression;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using System.IO.Compression;
 using System.Threading.RateLimiting;
 
 // One-shot CLI mode: copy a local SQLite attendance.db into a remote Postgres
@@ -24,6 +26,18 @@ var builder = WebApplication.CreateBuilder(args);
 // Services
 // ----------------------------------------------------------------------------
 builder.Services.AddControllersWithViews();
+builder.Services.AddResponseCompression(options =>
+{
+    options.EnableForHttps = true;
+    options.Providers.Add<BrotliCompressionProvider>();
+    options.Providers.Add<GzipCompressionProvider>();
+    options.MimeTypes = ResponseCompressionDefaults.MimeTypes.Concat(
+        ["application/octet-stream"]);
+});
+builder.Services.Configure<BrotliCompressionProviderOptions>(options =>
+    options.Level = CompressionLevel.Fastest);
+builder.Services.Configure<GzipCompressionProviderOptions>(options =>
+    options.Level = CompressionLevel.Fastest);
 
 builder.Services.AddDbContext<AppDbContext>(options =>
 {
@@ -264,7 +278,19 @@ app.Use(async (ctx, next) =>
     }
 });
 
-app.UseStaticFiles();
+app.UseResponseCompression();
+app.UseStaticFiles(new StaticFileOptions
+{
+    OnPrepareResponse = context =>
+    {
+        if (context.Context.Request.Path.StartsWithSegments(
+                "/vendor/face-api"))
+        {
+            context.Context.Response.Headers.CacheControl =
+                "public,max-age=2592000,immutable";
+        }
+    },
+});
 app.UseRouting();
 
 app.UseAuthentication();

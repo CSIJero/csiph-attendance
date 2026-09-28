@@ -50,6 +50,19 @@
         return modelsPromise;
     }
 
+    // Begin downloading and compiling the models as soon as the authenticated
+    // page is idle. By the time most users click Check in, the expensive first
+    // load is already complete and subsequent visits come from browser cache.
+    const preloadModels = () => loadModels().catch(error => {
+        console.warn("Face verification preload failed", error);
+        modelsPromise = null;
+    });
+    if ("requestIdleCallback" in window) {
+        window.requestIdleCallback(preloadModels, { timeout: 1000 });
+    } else {
+        window.setTimeout(preloadModels, 250);
+    }
+
     async function loadReferenceDescriptor() {
         referenceDescriptor = null;
         const response = await fetch("/api/face/reference", {
@@ -120,12 +133,9 @@
             return;
         }
 
-        status.textContent = "Loading secure face verification…";
+        status.textContent = "Starting camera…";
         try {
-            await loadModels();
-            if (requiresIdentityVerification()) {
-                await loadReferenceDescriptor();
-            }
+            const modelsReady = loadModels();
             stream = await navigator.mediaDevices.getUserMedia({
                 video: {
                     facingMode: "user",
@@ -136,6 +146,13 @@
             });
             video.srcObject = stream;
             await video.play();
+            status.textContent =
+                "Camera ready. Loading face verification models (the first load may take about a minute)…";
+            await modelsReady;
+            if (requiresIdentityVerification()) {
+                status.textContent = "Loading your enrolled face profile…";
+                await loadReferenceDescriptor();
+            }
             status.textContent = "Position only your face in the frame, then begin verification.";
         } catch (err) {
             console.warn("Face verification setup failed", err);

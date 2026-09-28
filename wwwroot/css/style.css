@@ -1034,6 +1034,9 @@ body.modal-open { overflow: hidden; }
     border-top: 1px solid var(--border);
     background: var(--panel-soft);
 }
+.selfie-actions [hidden] {
+    display: none !important;
+}
 
 /* Inline thumbnails for the attendance history table. */
 .selfie-thumb {
