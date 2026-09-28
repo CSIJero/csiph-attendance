@@ -254,10 +254,9 @@ public class OfflineNotifierService : BackgroundService
                 // to "rendered >= required hours" when the user has no
                 // schedule row for the check-in date (e.g. Support / 24/7
                 // rotation), so coverage never drops to zero.
-                var offset = UserClock.OffsetFor(u);
-                var nowLocal = new DateTimeOffset(nowUtc, TimeSpan.Zero).ToOffset(offset).DateTime;
+                var nowLocal = UserClock.ToLocal(u, nowUtc).DateTime;
                 var checkInUtc = DateTime.SpecifyKind(att.CheckIn, DateTimeKind.Utc);
-                var checkInLocal = new DateTimeOffset(checkInUtc, TimeSpan.Zero).ToOffset(offset).DateTime;
+                var checkInLocal = UserClock.ToLocal(u, checkInUtc).DateTime;
                 var schedule = await DbInitializer.GetEffectiveScheduleForDateAsync(
                     db, u, att.WorkDate);
                 DateTime? scheduledEndLocal = null;
@@ -330,9 +329,12 @@ public class OfflineNotifierService : BackgroundService
                 ? PresenceTracker.NormalizeOfflineReason(u.PresenceReason)
                 : "heartbeat_timeout";
 
-            // Hidden/minimized tabs alone are not offline. Explicit client
-            // transitions and a sustained heartbeat timeout are actionable.
-            if (!Constants.IsTrackedOfflineReason(offlineReason)) continue;
+            // Heartbeat loss still appears in presence history and dashboard
+            // state, but it is not reliable enough to trigger email: browser
+            // throttling or a transient transport failure can occur while the
+            // workstation remains open. Only lock, logout, and browser-close
+            // transitions are actionable notifications.
+            if (!Constants.IsNotifiableOfflineReason(offlineReason)) continue;
 
             var lastSeenUtc = u.LastSeen is { } seen
                 ? DateTime.SpecifyKind(seen, DateTimeKind.Utc)
@@ -503,14 +505,13 @@ public class OfflineNotifierService : BackgroundService
         CancellationToken ct,
         bool sendNotifications = true)
     {
-        var offset = UserClock.OffsetFor(u);
-        var nowLocal = new DateTimeOffset(nowUtc, TimeSpan.Zero).ToOffset(offset).DateTime;
+        var nowLocal = UserClock.ToLocal(u, nowUtc).DateTime;
 
         // Anchor the auto-close to the CHECK-IN's local day, not "today".
         // Otherwise an open row from yesterday would get clamped to today's
         // cutoff, inflating duration by ~24 hours.
         var checkInUtc = DateTime.SpecifyKind(att.CheckIn, DateTimeKind.Utc);
-        var checkInLocal = new DateTimeOffset(checkInUtc, TimeSpan.Zero).ToOffset(offset).DateTime;
+        var checkInLocal = UserClock.ToLocal(u, checkInUtc).DateTime;
 
         // Auto-close policy:
         //   - Support / Copilot rotation users: cap on elapsed time, since
@@ -589,7 +590,15 @@ public class OfflineNotifierService : BackgroundService
 
         if (nowLocal >= cutoffLocal && att.CheckOut is null)
         {
-            var cutoffUtc = DateTime.SpecifyKind(cutoffLocal - offset, DateTimeKind.Utc);
+            if (!UserClock.TryConvertLocalToUtc(u, cutoffLocal, out var cutoffUtc))
+            {
+                _log.LogWarning(
+                    "Skipping auto checkout for {User}: {Cutoff} is invalid in timezone {TimeZone}.",
+                    u.Username,
+                    cutoffLocal,
+                    UserClock.ZoneFor(u).Id);
+                return;
+            }
             att.CheckOut = cutoffUtc;
             await db.SaveChangesAsync(ct);
             _log.LogInformation("Auto checkout at cutoff for {User}", u.Username);
@@ -718,8 +727,9 @@ public class OfflineNotifierService : BackgroundService
         DateTime lastUtc,
         int thresholdMinutes)
     {
-        var lastSeenPht = PhTime.Format(lastUtc, "yyyy-MM-dd HH:mm");
-        var checkInPht = PhTime.Format(att.CheckIn, "yyyy-MM-dd HH:mm");
+        var lastSeenLocal = UserClock.Format(u, lastUtc, "yyyy-MM-dd HH:mm");
+        var checkInLocal = UserClock.Format(u, att.CheckIn, "yyyy-MM-dd HH:mm");
+        var timeZoneLabel = UserClock.Label(u);
         var who = $"{u.FullName} ({u.Username}, {u.EmployeeId ?? "-"})";
 
         var subject = level == AlertLevel.Deduction
@@ -729,8 +739,8 @@ public class OfflineNotifierService : BackgroundService
         var body =
             $"Employee : {who}\r\n" +
             $"Status : Offline for {minutes} minute(s) during an active shift.\r\n" +
-            $"Last seen : {lastSeenPht} PHT\r\n" +
-            $"Checked in : {checkInPht} PHT\r\n\r\n" +
+            $"Last seen : {lastSeenLocal} {timeZoneLabel}\r\n" +
+            $"Checked in : {checkInLocal} {timeZoneLabel}\r\n\r\n" +
             $"Gentle reminder that your laptop has been offline for {thresholdMinutes} minutes. Please contact your Project Manager.\r\n\r\n" +
             "This is an automated notification, kindly ignore if it does not apply.\r\n";
 

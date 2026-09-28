@@ -6,7 +6,7 @@
     and read-only flows.
 *@
 @{
-    var today = PhTime.Today;
+    var today = UserClock.TodayFor(Model.Target);
 }
 @if (Model.WeekBuckets.Count == 0)
 {

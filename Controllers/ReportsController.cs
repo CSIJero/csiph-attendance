@@ -183,7 +183,8 @@ public class ReportsController : AppController
     private async Task<DailyReportViewModel> BuildAsync(
         string? startRaw, string? endRaw, string? bu, int? userId, bool includeOff)
     {
-        var today = PhTime.Today;
+        var viewer = await GetCurrentUserAsync();
+        var today = UserClock.TodayFor(viewer);
         var defaultStart = today.AddDays(-13); // last 14 days inclusive
 
         var start = ParseDate(startRaw) ?? defaultStart;
@@ -666,7 +667,8 @@ public class ReportsController : AppController
     private async Task<WeeklyAttendanceViewModel> BuildWeeklyAsync(
         string? weekRaw, int weeks, int? userId, bool presentOnly)
     {
-        var today = PhTime.Today;
+        var viewer = await GetCurrentUserAsync();
+        var today = UserClock.TodayFor(viewer);
 
         // Clamp the span to 1 or 2 weeks (anything else falls back to 1).
         var span = weeks == 2 ? 2 : 1;

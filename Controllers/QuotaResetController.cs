@@ -125,10 +125,10 @@ public class QuotaResetController : AppController
             return RedirectToAction("Index", "Dashboard");
         }
 
-        var today = PhTime.Today;
+        var today = UserClock.TodayFor(me);
 
         // Don't accept a duplicate while one is still pending for the same
-        // kind on the same PHT day.
+        // kind on the same local day.
         var dup = await Db.QuotaResetRequests.AnyAsync(r =>
             r.UserId == me.Id
             && r.Kind == normalised
@@ -190,7 +190,7 @@ public class QuotaResetController : AppController
         var target = req.User ?? await Db.Users.FirstOrDefaultAsync(u => u.Id == req.UserId);
         if (target is null) return NotFound();
 
-        var today = PhTime.Today;
+        var today = UserClock.TodayFor(target);
         if (string.Equals(req.Kind, "break", StringComparison.OrdinalIgnoreCase))
         {
             target.BreaksUsedToday = 0;
@@ -288,7 +288,6 @@ public class QuotaResetController : AppController
             .Where(r => idList.Contains(r.Id))
             .ToListAsync();
 
-        var today = PhTime.Today;
         var applied = 0;
         var skipped = 0;
         foreach (var req in rows)
@@ -300,6 +299,7 @@ public class QuotaResetController : AppController
             {
                 var target = req.User ?? await Db.Users.FirstOrDefaultAsync(u => u.Id == req.UserId);
                 if (target is null) { skipped++; continue; }
+                var today = UserClock.TodayFor(target);
                 if (string.Equals(req.Kind, "break", StringComparison.OrdinalIgnoreCase))
                 {
                     target.BreaksUsedToday = 0;

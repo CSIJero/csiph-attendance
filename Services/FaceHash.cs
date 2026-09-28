@@ -5,23 +5,21 @@ using System.Globalization;
 namespace AttendanceMonitoring.Services;
 
 /// <summary>
-/// Lightweight perceptual hash ("aHash") implementation used for the
-/// liveness sanity check on check-in selfies. The image is downscaled
+/// Lightweight perceptual hash ("aHash") used as a server-side image
+/// consistency check alongside browser face recognition. The image is downscaled
 /// to 8×8 greyscale, then every pixel above the mean contributes a 1
 /// bit to the resulting 64-bit fingerprint.
 ///
-/// This is intentionally NOT a real face-recognition stack. We're not
-/// shipping ONNX Runtime + an embedding model in a Render free-tier
-/// container — instead we detect gross mismatches (someone clocking in
-/// with a completely different face). A Hamming distance ≤
+/// This is intentionally not the identity model; browser-generated face
+/// embeddings provide that comparison. The hash independently detects gross
+/// image mismatches. A Hamming distance ≤
 /// <see cref="Models.Constants.FaceMatchMaxDistance"/> against the
 /// enrolled hash is treated as a match.
 ///
 /// Uses <c>System.Drawing.Common</c>, which is Windows-only. On Linux
 /// runtimes (Render's deploy environment) the runtime package supports
-/// libgdiplus once the Dockerfile installs it, but we also gate the
-/// feature behind a try/catch so a decode failure simply records
-/// FaceMatchStatus = "Unavailable" instead of blocking check-ins.
+/// libgdiplus once the Dockerfile installs it. Decode failures return null,
+/// which the check-in flow rejects.
 /// </summary>
 public static class FaceHash
 {

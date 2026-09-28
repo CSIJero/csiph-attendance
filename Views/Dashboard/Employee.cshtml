@@ -258,7 +258,7 @@
         @foreach (var entry in Model.Schedule)
         {
             var classes = new List<string> { "schedule-day" };
-            if (entry.WorkDate == PhTime.Today) classes.Add("is-today");
+            if (entry.WorkDate == UserClock.TodayFor(viewer)) classes.Add("is-today");
             if (!entry.IsWorking) classes.Add("is-off");
             Model.WeekHolidays.TryGetValue(entry.WorkDate, out var holiday);
             <div class="@string.Join(' ', classes)">

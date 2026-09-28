@@ -23,6 +23,14 @@ public class User
     public string? BusinessUnit { get; set; }
 
     /// <summary>
+    /// IANA timezone reported by the browser at the most recent successful
+    /// login, for example <c>America/New_York</c> or <c>Asia/Manila</c>.
+    /// Attendance dates and schedule rules are evaluated in this zone.
+    /// </summary>
+    [MaxLength(100)]
+    public string? TimeZoneId { get; set; }
+
+    /// <summary>
     /// Semicolon-separated list of Business Units a Program Manager is
     /// responsible for (e.g. <c>"BU2 (PH);BU2 (IN)"</c>). Only meaningful
     /// when <see cref="Role"/> = <c>program_manager</c>; ignored for every
@@ -122,27 +130,27 @@ public class User
 
     /// <summary>
     /// Count of short breaks already consumed during <see cref="BreaksUsedDate"/>.
-    /// Reset to 0 when the PHT calendar day rolls over. Capped at
+    /// Reset to 0 when the user's local calendar day rolls over. Capped at
     /// <see cref="Constants.MaxShortBreaksPerDay"/>.
     /// </summary>
     public int BreaksUsedToday { get; set; } = 0;
 
     /// <summary>
-    /// PHT calendar date that <see cref="BreaksUsedToday"/> refers to.
+    /// Local calendar date that <see cref="BreaksUsedToday"/> refers to.
     /// When a break is started on a later date, the counter is reset first.
     /// </summary>
     public DateOnly? BreaksUsedDate { get; set; }
 
     /// <summary>
     /// Count of lunches already consumed during <see cref="LunchUsedDate"/>.
-    /// Reset to 0 when the PHT calendar day rolls over. Capped at
+    /// Reset to 0 when the user's local calendar day rolls over. Capped at
     /// <see cref="Constants.MaxLunchesPerDay"/> (currently 1), so the
     /// Start lunch button is disabled once it's been used today.
     /// </summary>
     public int LunchesUsedToday { get; set; } = 0;
 
     /// <summary>
-    /// PHT calendar date that <see cref="LunchesUsedToday"/> refers to.
+    /// Local calendar date that <see cref="LunchesUsedToday"/> refers to.
     /// When a lunch is started on a later date, the counter is reset first.
     /// </summary>
     public DateOnly? LunchesUsedDate { get; set; }
@@ -258,12 +266,19 @@ public class User
     /// Enrolled face fingerprint (16-character hex = 64-bit perceptual
     /// hash) computed from a reference selfie. On check-in the captured
     /// selfie's hash is compared via Hamming distance; results above
-    /// <see cref="Constants.FaceMatchMaxDistance"/> bits are flagged for
-    /// admin review. Null = user has not enrolled a reference selfie
-    /// yet; check-in falls back to the existing heuristic face check.
+    /// <see cref="Constants.FaceMatchMaxDistance"/> bits block check-in.
+    /// When null, check-in first tries to enroll from the user's latest stored
+    /// check-in selfie, then requires manual enrollment if none is usable.
     /// </summary>
     [MaxLength(32)]
     public string? FaceHash { get; set; }
+
+    /// <summary>
+    /// JSON-encoded 128-value face-api embedding used for identity matching.
+    /// It cannot be converted back into the original selfie.
+    /// </summary>
+    [MaxLength(8192)]
+    public string? FaceDescriptor { get; set; }
 
     /// <summary>UTC timestamp the reference selfie was enrolled.</summary>
     public DateTime? FaceEnrolledAt { get; set; }

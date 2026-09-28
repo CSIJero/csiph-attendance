@@ -125,10 +125,8 @@ public static class PresenceTracker
         IEnumerable<Attendance>? attendances = null,
         int offlineThresholdSeconds = Constants.DefaultOnlineThresholdSeconds)
     {
-        var offset = UserClock.OffsetFor(user);
-        var localStart = date.ToDateTime(TimeOnly.MinValue);
-        var startUtc = DateTime.SpecifyKind(localStart - offset, DateTimeKind.Utc);
-        var endUtc = startUtc.AddDays(1);
+        var startUtc = UserClock.StartOfDateUtc(user, date);
+        var endUtc = UserClock.StartOfDateUtc(user, date.AddDays(1));
         nowUtc = AsUtc(nowUtc);
         var attendanceWindows = attendances?
             .Where(attendance => attendance.UserId == user.Id)

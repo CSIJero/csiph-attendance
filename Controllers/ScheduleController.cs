@@ -32,10 +32,11 @@ public class ScheduleController : AppController
     {
         if (!IsAdmin) return Forbid();
 
-        var monthStart = ParseMonth(monthRaw) ?? FirstOfMonth(PhTime.Today);
+        var me = await GetCurrentUserAsync();
+        var monthStart = ParseMonth(monthRaw)
+            ?? FirstOfMonth(UserClock.TodayFor(me));
         var daysInMonth = DateTime.DaysInMonth(monthStart.Year, monthStart.Month);
         var monthEnd = monthStart.AddDays(daysInMonth - 1);
-        var me = await GetCurrentUserAsync();
         var visibleUsers = await (await GetVisibleUsersAsync())
             .Where(u => u.Role != Roles.Admin && u.EmployeeId != null && u.EmployeeId != "")
             .OrderBy(u => me != null && u.Id == me.Id ? 0 : 1)
@@ -113,10 +114,11 @@ public class ScheduleController : AppController
     {
         if (!IsAdmin) return Forbid();
 
-        var monthStart = ParseMonth(monthRaw) ?? FirstOfMonth(PhTime.Today);
+        var me = await GetCurrentUserAsync();
+        var monthStart = ParseMonth(monthRaw)
+            ?? FirstOfMonth(UserClock.TodayFor(me));
         var daysInMonth = DateTime.DaysInMonth(monthStart.Year, monthStart.Month);
         var monthEnd = monthStart.AddDays(daysInMonth - 1);
-        var me = await GetCurrentUserAsync();
         var visibleUsersQuery = (await GetVisibleUsersAsync())
             .Where(u => u.Role != Roles.Admin && u.EmployeeId != null && u.EmployeeId != "");
 
@@ -282,7 +284,9 @@ public class ScheduleController : AppController
             .GroupBy(u => (u.EmployeeId ?? string.Empty).Trim(), StringComparer.OrdinalIgnoreCase)
             .ToDictionary(g => g.Key, g => g.First(), StringComparer.OrdinalIgnoreCase);
 
-        var monthStart = ParseMonth(monthRaw) ?? FirstOfMonth(PhTime.Today);
+        var me = await GetCurrentUserAsync();
+        var monthStart = ParseMonth(monthRaw)
+            ?? FirstOfMonth(UserClock.TodayFor(me));
         var daysInMonth = DateTime.DaysInMonth(monthStart.Year, monthStart.Month);
         var errors = new List<string>();
         var parsed = new Dictionary<(int UserId, DateOnly WorkDate), BulkScheduleRow>();
@@ -542,7 +546,7 @@ public class ScheduleController : AppController
 
     // Month editor with optional week filter. Query params:
     //   user_id : target user (admin-only override; defaults to self)
-    //   month   : YYYY-MM (defaults to current PHT month)
+    //   month   : YYYY-MM (defaults to the current local month)
     //   week    : 1..5    (filters editor to a single week; 0/missing = show all)
     [HttpGet("edit")]
     public async Task<IActionResult> Edit(
@@ -583,8 +587,9 @@ public class ScheduleController : AppController
         // Cross-midnight times are valid for every scheduled employee.
         var isSupportTarget = target.IsSupport;
 
-        // Anchor month: query param wins, else current PHT month.
-        var monthStart = ParseMonth(monthRaw) ?? FirstOfMonth(PhTime.Today);
+        // Anchor month: query param wins, else the target user's local month.
+        var monthStart = ParseMonth(monthRaw)
+            ?? FirstOfMonth(UserClock.TodayFor(target));
         var daysInMonth = DateTime.DaysInMonth(monthStart.Year, monthStart.Month);
         var monthEnd = monthStart.AddDays(daysInMonth - 1);
         var weekFilter = weekRaw is int w && w >= 1 && w <= 5 ? w : 0;

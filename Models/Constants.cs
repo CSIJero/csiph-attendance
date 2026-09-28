@@ -29,6 +29,17 @@ public static class Constants
             || reason.Equals("inactive", StringComparison.OrdinalIgnoreCase)
             || reason.Equals("heartbeat_timeout", StringComparison.OrdinalIgnoreCase));
 
+    /// <summary>
+    /// Reasons that can safely trigger offline-alert emails. Heartbeat
+    /// timeouts and inactivity are excluded because an open workstation can
+    /// appear stale or idle while the employee remains available.
+    /// </summary>
+    public static bool IsNotifiableOfflineReason(string? reason) =>
+        reason is not null
+        && (reason.Equals("locked", StringComparison.OrdinalIgnoreCase)
+            || reason.Equals("logout", StringComparison.OrdinalIgnoreCase)
+            || reason.Equals("browser_closed", StringComparison.OrdinalIgnoreCase));
+
     /// <summary>Maximum age of a login session that can still appear online.</summary>
     public const int MaximumOnlineLoginHours = 8;
 

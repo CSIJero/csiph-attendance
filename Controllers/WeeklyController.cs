@@ -119,7 +119,8 @@ public class WeeklyController : AppController
     private async Task<WeeklyAttendanceViewModel> BuildAsync(
         string? weekRaw, int weeks, int? userId, bool presentOnly)
     {
-        var today = PhTime.Today;
+        var viewer = await GetCurrentUserAsync();
+        var today = UserClock.TodayFor(viewer);
 
         // Clamp the span to 1 or 2 weeks (anything else falls back to 1).
         var span = weeks == 2 ? 2 : 1;
@@ -236,4 +237,3 @@ public class WeeklyController : AppController
         public int TotalMinutes { get; set; }
     }
 }
-

@@ -9,14 +9,14 @@
         <p class="muted">
             Enroll a single reference selfie. Every subsequent check-in
             selfie is compared against this reference using a perceptual
-            hash (a "fingerprint" of the image). Mismatches do not block
-            check-ins — they are logged so administrators can investigate.
+            hash (a "fingerprint" of the image). If no profile exists, your
+            latest stored check-in selfie is used automatically; otherwise
+            manual enrollment is required.
         </p>
         <p class="muted">
-            We do <strong>not</strong> store your face image or any
-            biometric template that can be reversed back to a photo. The
-            stored value is a 64-bit number derived from the 8&times;8
-            greyscale thumbnail of your reference photo.
+            The account stores a one-way image hash and a 128-value face
+            embedding used for matching. These values cannot be converted
+            back into the original selfie.
         </p>
     </div>
 </section>
@@ -55,10 +55,12 @@
             @foreach (var item in Model.RecentSelfies)
             {
                 <form method="post" asp-action="EnrollFromHistory" class="face-tile"
+                      data-face-history-form
                       style="display:flex; flex-direction:column; align-items:stretch; gap:6px;
                              border:1px solid var(--border,#ccc); border-radius:8px; padding:8px;">
                     @Html.AntiForgeryToken()
                     <input type="hidden" name="attendanceId" value="@item.AttendanceId" />
+                    <input type="hidden" name="descriptor" value="" />
                     <img src="@item.Photo" alt="Check-in selfie @item.WorkDate"
                          style="width:100%; aspect-ratio:1/1; object-fit:cover; border-radius:6px;" />
                     <div style="display:flex; flex-direction:column; gap:2px;">
@@ -76,8 +78,7 @@
                             <span class="pill @pillClass" style="font-size:0.7rem;">@item.FaceMatchStatus</span>
                         }
                     </div>
-                    <button type="submit" class="btn btn-sm btn-primary"
-                            onclick="return confirm('Use this selfie as your reference?');">
+                    <button type="submit" class="btn btn-sm btn-primary">
                         Use this photo
                     </button>
                 </form>
@@ -89,9 +90,8 @@ else
 {
     <section class="card">
         <p class="muted">
-            No past check-in selfies on file yet. Either complete one
-            check-in (it will auto-enroll the first time) or capture a
-            fresh reference photo below.
+            No past check-in selfies are available. Capture a fresh reference
+            photo below before checking in.
         </p>
     </section>
 }
@@ -105,6 +105,7 @@ else
     <form method="post" asp-action="Enroll" id="face-form" class="form">
         @Html.AntiForgeryToken()
         <input type="hidden" name="photo" id="face-photo" />
+        <input type="hidden" name="descriptor" id="face-descriptor" />
         <div class="form-actions">
             <button type="button" class="btn" id="face-capture">Capture photo</button>
             <button type="submit" class="btn btn-primary" id="face-submit" disabled>Save as reference</button>
@@ -115,29 +116,3 @@ else
         </div>
     </form>
 </section>
-
-<script>
-    (function () {
-        var video = document.getElementById('face-video');
-        var canvas = document.getElementById('face-canvas');
-        var preview = document.getElementById('face-preview');
-        var photoInput = document.getElementById('face-photo');
-        var submitBtn = document.getElementById('face-submit');
-
-        navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user' }, audio: false })
-            .then(function (stream) { video.srcObject = stream; })
-            .catch(function (err) {
-                preview.innerHTML = '<p class="muted">Camera unavailable: ' + err.message + '</p>';
-            });
-
-        document.getElementById('face-capture').addEventListener('click', function () {
-            canvas.width = video.videoWidth || 320;
-            canvas.height = video.videoHeight || 240;
-            canvas.getContext('2d').drawImage(video, 0, 0, canvas.width, canvas.height);
-            var data = canvas.toDataURL('image/jpeg', 0.85);
-            photoInput.value = data;
-            preview.innerHTML = '<img src="' + data + '" alt="Captured preview" style="max-width:200px; border-radius:8px;" />';
-            submitBtn.disabled = false;
-        });
-    })();
-</script>

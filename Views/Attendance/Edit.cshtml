@@ -2,17 +2,16 @@
 @{
     ViewData["Title"] = $"Edit attendance · {Model.User?.FullName}";
     // The form posts wall-clock values back; treat them in the *subject's*
-    // local zone (IST for India BUs, PHT otherwise) so round-tripping
+    // captured local zone so round-tripping
     // matches what the user sees.
     var subject = Model.User;
     var subjectTz = AttendanceMonitoring.Services.UserClock.Label(subject);
-    var subjectOffset = AttendanceMonitoring.Services.UserClock.DisplayOffset(subject);
     DateTime? ToLocal(DateTime? utc)
     {
         if (utc is null) return null;
-        var v = utc.Value;
-        if (v.Kind == DateTimeKind.Unspecified) v = DateTime.SpecifyKind(v, DateTimeKind.Utc);
-        return new DateTimeOffset(v).ToOffset(subjectOffset).DateTime;
+        return AttendanceMonitoring.Services.UserClock
+            .ToLocal(subject, utc.Value)
+            .DateTime;
     }
     var ciPh = ToLocal(Model.CheckIn);
     var coPh = ToLocal(Model.CheckOut);

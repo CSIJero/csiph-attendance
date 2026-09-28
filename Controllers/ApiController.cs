@@ -46,6 +46,36 @@ public class ApiController : ControllerBase
         public string? State { get; set; }
     }
 
+    [HttpGet("face/reference")]
+    public async Task<IActionResult> FaceReference()
+    {
+        var raw = User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
+        if (!int.TryParse(raw, out var id)) return Unauthorized();
+
+        var user = await _db.Users
+            .AsNoTracking()
+            .FirstOrDefaultAsync(candidate => candidate.Id == id);
+        if (user is null) return Unauthorized();
+
+        if (FaceDescriptor.TryParse(user.FaceDescriptor, out _))
+            return new JsonResult(new { ready = true });
+
+        var lastPhoto = await _db.Attendances
+            .AsNoTracking()
+            .Where(attendance => attendance.UserId == id
+                && attendance.CheckInPhoto != null
+                && attendance.CheckInPhoto != "")
+            .OrderByDescending(attendance => attendance.CheckIn)
+            .Select(attendance => attendance.CheckInPhoto)
+            .FirstOrDefaultAsync();
+
+        return new JsonResult(new
+        {
+            ready = false,
+            reference_photo = lastPhoto,
+        });
+    }
+
     [HttpPost("heartbeat")]
     [EnableRateLimiting("Heartbeat")]
     [RequestSizeLimit(1024)]
@@ -117,9 +147,9 @@ public class ApiController : ControllerBase
             last_seen = u.LastSeen!.Value.ToString("o"),
             lunch_ends_at = LunchEndsAt(u)?.ToString("o"),
             break_ends_at = BreakEndsAt(u)?.ToString("o"),
-            breaks_used = BreaksUsedTodayPh(u),
+            breaks_used = BreaksUsedTodayLocal(u),
             breaks_max = Models.Constants.MaxShortBreaksPerDay,
-            lunches_used = LunchesUsedTodayPh(u),
+            lunches_used = LunchesUsedTodayLocal(u),
             lunches_max = Models.Constants.MaxLunchesPerDay,
         });
     }
@@ -204,22 +234,22 @@ public class ApiController : ControllerBase
     }
 
     /// <summary>
-    /// Returns the user's break counter for the current PHT calendar day.
+    /// Returns the user's break counter for their current local calendar day.
     /// Returns 0 (without mutating) when the stored date is older than today.
     /// </summary>
-    private static int BreaksUsedTodayPh(Models.User u)
+    private static int BreaksUsedTodayLocal(Models.User u)
     {
-        var today = PhTime.Today;
+        var today = UserClock.TodayFor(u);
         return (u.BreaksUsedDate == today) ? u.BreaksUsedToday : 0;
     }
 
     /// <summary>
-    /// Returns the user's lunch counter for the current PHT calendar day.
+    /// Returns the user's lunch counter for their current local calendar day.
     /// Returns 0 (without mutating) when the stored date is older than today.
     /// </summary>
-    private static int LunchesUsedTodayPh(Models.User u)
+    private static int LunchesUsedTodayLocal(Models.User u)
     {
-        var today = PhTime.Today;
+        var today = UserClock.TodayFor(u);
         return (u.LunchesUsedDate == today) ? u.LunchesUsedToday : 0;
     }
 
@@ -263,9 +293,9 @@ public class ApiController : ControllerBase
         var u = await _db.Users.FirstOrDefaultAsync(x => x.Id == id);
         if (u is null) return Unauthorized();
 
-        // Reset the daily counter when the PHT date rolls over so the user
+        // Reset the daily counter when the user's local date rolls over so the user
         // can take their one lunch again tomorrow.
-        var today = PhTime.Today;
+        var today = UserClock.TodayFor(u);
         if (u.LunchesUsedDate != today)
         {
             u.LunchesUsedToday = 0;
@@ -323,13 +353,13 @@ public class ApiController : ControllerBase
         {
             ok = true,
             state = u.PresenceState,
-            lunches_used = LunchesUsedTodayPh(u),
+            lunches_used = LunchesUsedTodayLocal(u),
             lunches_max = Models.Constants.MaxLunchesPerDay,
         });
     }
 
     // ------------------------------------------------------------------
-    // Short break (15 min) — up to MaxShortBreaksPerDay per PHT day,
+    // Short break (15 min) — up to MaxShortBreaksPerDay per local day,
     // in addition to the one lunch break. Same semantics as lunch:
     // suppresses offline alerts and auto-expires after the window.
     // ------------------------------------------------------------------
@@ -343,8 +373,8 @@ public class ApiController : ControllerBase
         var u = await _db.Users.FirstOrDefaultAsync(x => x.Id == id);
         if (u is null) return Unauthorized();
 
-        // Reset the daily counter when the PHT date rolls over.
-        var today = PhTime.Today;
+        // Reset the daily counter when the user's local date rolls over.
+        var today = UserClock.TodayFor(u);
         if (u.BreaksUsedDate != today)
         {
             u.BreaksUsedToday = 0;
@@ -402,7 +432,7 @@ public class ApiController : ControllerBase
         {
             ok = true,
             state = u.PresenceState,
-            breaks_used = BreaksUsedTodayPh(u),
+            breaks_used = BreaksUsedTodayLocal(u),
             breaks_max = Models.Constants.MaxShortBreaksPerDay,
         });
     }
@@ -503,27 +533,42 @@ public class ApiController : ControllerBase
     public async Task<IActionResult> Status()
     {
         var users = await VisibleUsersAsync();
-        var today = PhTime.Today;
-        var yesterday = today.AddDays(-1);
         var userIds = users.Select(u => u.Id).ToList();
+        var relevantDates = users
+            .SelectMany(u =>
+            {
+                var today = UserClock.TodayFor(u);
+                return new[] { today, today.AddDays(-1) };
+            })
+            .Distinct()
+            .ToArray();
         var attendanceRows = await _db.Attendances
             .Where(a => userIds.Contains(a.UserId)
-                        && (a.WorkDate == today
-                            || (a.WorkDate == yesterday && a.CheckOut == null)))
+                        && relevantDates.Contains(a.WorkDate))
             .OrderByDescending(a => a.CheckIn)
             .ToListAsync();
         var todays = attendanceRows
             .GroupBy(a => a.UserId)
             .ToDictionary(
                 g => g.Key,
-                g => g.OrderByDescending(a => a.IsOpen)
-                      .ThenByDescending(a => a.CheckIn)
-                      .First());
-        var todaysSchedule = await _db.ScheduleEntries
-            .Where(s => s.WorkDate == today && userIds.Contains(s.UserId))
-            .ToDictionaryAsync(s => s.UserId);
+                g =>
+                {
+                    var user = users.First(u => u.Id == g.Key);
+                    var today = UserClock.TodayFor(user);
+                    return g.Where(a => a.WorkDate == today || a.IsOpen)
+                        .OrderByDescending(a => a.IsOpen)
+                        .ThenByDescending(a => a.CheckIn)
+                        .FirstOrDefault();
+                });
+        var todaysScheduleRows = await _db.ScheduleEntries
+            .Where(s => relevantDates.Contains(s.WorkDate)
+                        && userIds.Contains(s.UserId))
+            .ToListAsync();
+        var todaysSchedule = todaysScheduleRows
+            .GroupBy(s => (s.UserId, s.WorkDate))
+            .ToDictionary(g => g.Key, g => g.OrderByDescending(s => s.Id).First());
         var todayHolidayRows = await _db.Holidays
-            .Where(h => h.Date == today)
+            .Where(h => relevantDates.Contains(h.Date))
             .ToListAsync();
         var presenceIntervals = await _db.PresenceIntervals
             .Where(p => userIds.Contains(p.UserId)
@@ -541,10 +586,13 @@ public class ApiController : ControllerBase
         foreach (var u in users)
         {
             todays.TryGetValue(u.Id, out var att);
-            todaysSchedule.TryGetValue(u.Id, out var sched);
+            var today = UserClock.TodayFor(u);
+            todaysSchedule.TryGetValue((u.Id, today), out var sched);
             var state = u.EffectiveDashboardState(att, _onlineThreshold);
             var isOnline = state != "offline";
-            var isHoliday = todayHolidayRows.Any(h => h.Country == HolidayHelper.CountryFor(u) || h.Country == "ALL");
+            var isHoliday = todayHolidayRows.Any(h =>
+                h.Date == today
+                && (h.Country == HolidayHelper.CountryFor(u) || h.Country == "ALL"));
             var todayWorkType = isHoliday ? "Holiday" : sched?.EffectiveWorkType;
             if (isOnline) online++;
             if (state == "lunch") lunch++;
@@ -671,7 +719,7 @@ public class ApiController : ControllerBase
     // Offsite-days editor (admin quick action on the dashboard modal)
     //
     // Under the per-date schedule model these endpoints operate on the
-    // current PHT week (Mon..Sun containing today): GET reports which
+    // current local week (Mon..Sun containing today): GET reports which
     // weekdays of this week the user currently has a working entry for.
     // POST applies the selected weekday pattern to a rolling horizon
     // (current week + next N weeks) so admins don't need to repeat the
@@ -679,13 +727,13 @@ public class ApiController : ControllerBase
     // ------------------------------------------------------------------
     public class OffsiteDaysRequest
     {
-        // Working weekdays (0=Mon … 6=Sun) of the current PHT week.
+        // Working weekdays (0=Mon … 6=Sun) of the current local week.
         public List<int>? Days { get; set; }
     }
 
-    private static (DateOnly weekStart, DateOnly weekEnd) CurrentPhWeekRange()
+    private static (DateOnly weekStart, DateOnly weekEnd) CurrentWeekRange(User user)
     {
-        var today = AttendanceMonitoring.Services.PhTime.Today;
+        var today = UserClock.TodayFor(user);
         var todayIdx = ((int)today.DayOfWeek + 6) % 7; // Mon = 0
         var start = today.AddDays(-todayIdx);
         return (start, start.AddDays(6));
@@ -694,7 +742,7 @@ public class ApiController : ControllerBase
     private const int OffsiteHorizonWeeks = 12;
 
     /// <summary>
-    /// Returns which weekdays (0=Mon … 6=Sun) of the current PHT week
+    /// Returns which weekdays (0=Mon … 6=Sun) of the user's current week
     /// the user has a working schedule row for. Admins can query anyone;
     /// non-admins can only query themselves.
     /// </summary>
@@ -709,7 +757,7 @@ public class ApiController : ControllerBase
         var target = await _db.Users.FirstOrDefaultAsync(u => u.Id == userId);
         if (target is null) return NotFound();
 
-        var (weekStart, weekEnd) = CurrentPhWeekRange();
+        var (weekStart, weekEnd) = CurrentWeekRange(target);
         var entries = await _db.ScheduleEntries
             .Where(s => s.UserId == target.Id && s.WorkDate >= weekStart && s.WorkDate <= weekEnd)
             .OrderBy(s => s.WorkDate)
@@ -780,7 +828,7 @@ public class ApiController : ControllerBase
         var rawDays = body?.Days ?? new List<int>();
         var offsiteSet = rawDays.Where(d => d is >= 0 and <= 6).ToHashSet();
 
-        var (weekStart, _) = CurrentPhWeekRange();
+        var (weekStart, _) = CurrentWeekRange(target);
         var defaultStart = new TimeOnly(9, 0);
         var defaultEnd = new TimeOnly(18, 0);
         var horizonDates = Enumerable

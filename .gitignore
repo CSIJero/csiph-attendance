@@ -3,6 +3,7 @@
 [Oo]bj/
 out/
 publish/
+node_modules/
 
 # Visual Studio / Rider / VS Code
 .vs/

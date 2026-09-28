@@ -4,13 +4,10 @@
     ViewData["Title"] = "Request attendance edit";
     var subject = Model.Record.User;
     var subjectTz = UserClock.Label(subject);
-    var subjectOffset = UserClock.DisplayOffset(subject);
     DateTime? ToLocal(DateTime? utc)
     {
         if (utc is null) return null;
-        var v = utc.Value;
-        if (v.Kind == DateTimeKind.Unspecified) v = DateTime.SpecifyKind(v, DateTimeKind.Utc);
-        return new DateTimeOffset(v).ToOffset(subjectOffset).DateTime;
+        return UserClock.ToLocal(subject, utc.Value).DateTime;
     }
     var ciPh = ToLocal(Model.Record.CheckIn);
     var coPh = ToLocal(Model.Record.CheckOut);

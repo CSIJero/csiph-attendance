@@ -31,7 +31,7 @@ public class ProfileController : AppController
             .FirstOrDefaultAsync(u => u.Id == CurrentUserId);
         if (me is null) return Challenge();
 
-        var today = PhTime.Today;
+        var today = UserClock.TodayFor(me);
         var todayIdx = ((int)today.DayOfWeek + 6) % 7;
         var weekStart = today.AddDays(-todayIdx);
         var weekEnd = weekStart.AddDays(6);

@@ -106,6 +106,11 @@ public class AccountController : AppController
         // name; capturing the UA is the most we can do server-side.
         user.LastLoginAgent = ClientInfo.GetAgentLabel(HttpContext);
         user.LastLoginAt = DateTime.UtcNow;
+        if (UserClock.TryGetBrowserTz() is { Iana.Length: > 0 } browserTz
+            && UserClock.IsValidTimeZoneId(browserTz.Iana))
+        {
+            user.TimeZoneId = browserTz.Iana;
+        }
         var nowUtc = DateTime.UtcNow;
         await PresenceTracker.MarkPresentAsync(
             Db, user, "online", "login", nowUtc, _onlineThreshold);

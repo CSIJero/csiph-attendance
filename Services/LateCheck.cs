@@ -95,7 +95,7 @@ public static class LateCheck
         var ci = checkInUtc.Kind == DateTimeKind.Unspecified
             ? DateTime.SpecifyKind(checkInUtc, DateTimeKind.Utc)
             : checkInUtc.ToUniversalTime();
-        var local = new DateTimeOffset(ci).ToOffset(UserClock.OffsetFor(user));
+        var local = UserClock.ToLocal(user, ci);
         var start = schedule.StartTime.Value;
 
         // Anchor lateness to the schedule's calendar date in the employee's

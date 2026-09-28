@@ -415,6 +415,8 @@ public class LeaveController : AppController
     private async Task<LeaveRequestFormViewModel> BuildFormVmAsync()
     {
         var meId = CurrentUserId ?? 0;
+        var me = await GetCurrentUserAsync();
+        var today = UserClock.TodayFor(me);
         var candidates = IsAdmin
             ? await (await GetVisibleUsersAsync()).OrderBy(u => u.FullName).ToListAsync()
             : new List<User>();
@@ -423,8 +425,8 @@ public class LeaveController : AppController
         {
             CandidateUsers = candidates,
             TargetUserId = meId,
-            StartDate = PhTime.Today.ToDateTime(new TimeOnly(9, 0)),
-            EndDate = PhTime.Today.ToDateTime(new TimeOnly(18, 0)),
+            StartDate = today.ToDateTime(new TimeOnly(9, 0)),
+            EndDate = today.ToDateTime(new TimeOnly(18, 0)),
             LeaveType = "Full",
             HoursPerDay = 8m,
             ViewerIsAdmin = IsAdmin,

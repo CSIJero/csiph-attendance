@@ -28,7 +28,7 @@ public class QuotaResetRequest
     public string Kind { get; set; } = "break";
 
     /// <summary>
-    /// PHT calendar date the reset is targeted at. Approval is a no-op
+    /// User-local calendar date the reset is targeted at. Approval is a no-op
     /// (still marks the request decided) if the user's
     /// <c>BreaksUsedDate</c> / <c>LunchesUsedDate</c> has already rolled
     /// past this date, since the counter has auto-reset itself.

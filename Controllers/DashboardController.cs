@@ -69,7 +69,7 @@ public class DashboardController : AppController
             return RedirectToAction(nameof(Index));
         }
 
-        var today = PhTime.Today;
+        var today = UserClock.TodayFor(me);
 
         var dup = await Db.QuotaResetRequests.AnyAsync(r =>
             r.UserId == me.Id
@@ -107,7 +107,7 @@ public class DashboardController : AppController
 
     private async Task<IActionResult> AdminViewAsync(User me)
     {
-        var today = PhTime.Today;
+        var today = UserClock.TodayFor(me);
 
         var visibleQ = await GetVisibleUsersAsync();
         var users = await visibleQ
@@ -115,11 +115,17 @@ public class DashboardController : AppController
             .ToListAsync();
 
         var userIds = users.Select(u => u.Id).ToList();
-        var yesterday = today.AddDays(-1);
+        var relevantScheduleDates = users
+            .SelectMany(u =>
+            {
+                var userToday = UserClock.TodayFor(u);
+                return new[] { userToday, userToday.AddDays(-1) };
+            })
+            .Distinct()
+            .ToArray();
         var todaysRows = await Db.Attendances
             .Where(a => userIds.Contains(a.UserId)
-                        && (a.WorkDate == today
-                            || (a.WorkDate == yesterday && a.CheckOut == null)))
+                        && relevantScheduleDates.Contains(a.WorkDate))
             .OrderByDescending(a => a.CheckIn)
             .ToListAsync();
         var todays = todaysRows
@@ -128,11 +134,16 @@ public class DashboardController : AppController
             .GroupBy(a => a.UserId)
             .ToDictionary(
                 g => g.Key,
-                g => g.OrderByDescending(x => x.IsOpen)
-                      .ThenByDescending(x => x.CheckIn)
-                      .First());
+                g =>
+                {
+                    var user = users.First(u => u.Id == g.Key);
+                    var userToday = UserClock.TodayFor(user);
+                    return g.Where(a => a.WorkDate == userToday || a.IsOpen)
+                        .OrderByDescending(x => x.IsOpen)
+                        .ThenByDescending(x => x.CheckIn)
+                        .FirstOrDefault();
+                });
 
-        var relevantScheduleDates = new[] { yesterday, today };
         var todaysScheduleRows = await Db.ScheduleEntries
             .Where(s => relevantScheduleDates.Contains(s.WorkDate)
                         && userIds.Contains(s.UserId))
@@ -163,7 +174,7 @@ public class DashboardController : AppController
             var isOnline = state != "offline";
             if (isOnline) online++;
             if (state == "lunch") lunch++;
-            var activeWorkDate = att?.WorkDate ?? today;
+            var activeWorkDate = att?.WorkDate ?? UserClock.TodayFor(u);
             todaysSchedule.TryGetValue((u.Id, activeWorkDate), out var sched);
             var isHoliday = IsHolidayForUser(
                 u, todayHolidayRows.Where(h => h.Date == activeWorkDate));
@@ -299,7 +310,7 @@ public class DashboardController : AppController
 
     private async Task<IActionResult> EmployeeViewAsync(User me)
     {
-        var today = PhTime.Today;
+        var today = UserClock.TodayFor(me);
 
         var myAttendance = await Db.Attendances
             .FirstOrDefaultAsync(a => a.UserId == me.Id && a.WorkDate == today);

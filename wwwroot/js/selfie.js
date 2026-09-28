@@ -23,6 +23,57 @@
     let currentForm = null;
     let stream = null;
     let lastDataUrl = null;
+    let lastDescriptor = null;
+    let referenceDescriptor = null;
+    let livenessPassed = false;
+    let modelsPromise = null;
+    const modelUrl = "/vendor/face-api/models";
+    const detectorOptions = () => new faceapi.TinyFaceDetectorOptions({
+        inputSize: 320,
+        scoreThreshold: 0.75,
+    });
+
+    function requiresIdentityVerification() {
+        if (!currentForm) return false;
+        return new URL(currentForm.action, window.location.href)
+            .pathname.toLowerCase() === "/check-in";
+    }
+
+    function loadModels() {
+        if (!modelsPromise) {
+            modelsPromise = Promise.all([
+                faceapi.nets.tinyFaceDetector.loadFromUri(modelUrl),
+                faceapi.nets.faceLandmark68TinyNet.loadFromUri(modelUrl),
+                faceapi.nets.faceRecognitionNet.loadFromUri(modelUrl),
+            ]);
+        }
+        return modelsPromise;
+    }
+
+    async function loadReferenceDescriptor() {
+        referenceDescriptor = null;
+        const response = await fetch("/api/face/reference", {
+            credentials: "same-origin",
+            headers: { "X-Requested-With": "fetch" },
+        });
+        if (!response.ok) throw new Error(`Reference request failed (${response.status})`);
+
+        const data = await response.json();
+        if (data.ready) return;
+        if (!data.reference_photo) {
+            throw new Error("No previous selfie is available. Open Face profile and enroll before checking in.");
+        }
+
+        const image = await faceapi.fetchImage(data.reference_photo);
+        const result = await faceapi
+            .detectSingleFace(image, detectorOptions())
+            .withFaceLandmarks(true)
+            .withFaceDescriptor();
+        if (!result) {
+            throw new Error("Your previous selfie cannot be used as a face reference. Please enroll a new face profile.");
+        }
+        referenceDescriptor = Array.from(result.descriptor);
+    }
 
     function openModal() {
         modal.hidden = false;
@@ -54,6 +105,8 @@
         retakeBtn.hidden = true;
         confirmBtn.hidden = true;
         lastDataUrl = null;
+        lastDescriptor = null;
+        livenessPassed = false;
         preview.removeAttribute("src");
     }
 
@@ -67,8 +120,12 @@
             return;
         }
 
-        status.textContent = "Starting camera…";
+        status.textContent = "Loading secure face verification…";
         try {
+            await loadModels();
+            if (requiresIdentityVerification()) {
+                await loadReferenceDescriptor();
+            }
             stream = await navigator.mediaDevices.getUserMedia({
                 video: {
                     facingMode: "user",
@@ -79,20 +136,132 @@
             });
             video.srcObject = stream;
             await video.play();
-            status.textContent = "Position your face in the frame.";
+            status.textContent = "Position only your face in the frame, then begin verification.";
         } catch (err) {
-            console.warn("getUserMedia failed", err);
-            status.textContent =
-                "Camera unavailable or permission denied. A selfie is required "
-                + "— please allow camera access in your browser settings and try again.";
+            console.warn("Face verification setup failed", err);
+            status.textContent = err && err.message
+                ? err.message
+                : "Camera or face verification is unavailable. Please allow camera access and try again.";
             // Hide the Capture button so the user can't proceed without a photo.
             captureBtn.hidden = true;
         }
     }
 
-    function captureFrame() {
+    function pointDistance(left, right) {
+        return Math.hypot(left.x - right.x, left.y - right.y);
+    }
+
+    function eyeAspectRatio(points) {
+        const vertical = pointDistance(points[1], points[5])
+            + pointDistance(points[2], points[4]);
+        const horizontal = 2 * pointDistance(points[0], points[3]);
+        return horizontal > 0 ? vertical / horizontal : 0;
+    }
+
+    function nosePosition(landmarks) {
+        const jaw = landmarks.getJawOutline();
+        const nose = landmarks.getNose();
+        const width = jaw[16].x - jaw[0].x;
+        return width > 0 ? (nose[3].x - jaw[0].x) / width : 0.5;
+    }
+
+    function delay(milliseconds) {
+        return new Promise(resolve => setTimeout(resolve, milliseconds));
+    }
+
+    async function detectLiveFace() {
+        const results = await faceapi
+            .detectAllFaces(video, detectorOptions())
+            .withFaceLandmarks(true)
+            .withFaceDescriptors();
+        if (results.length !== 1) return null;
+
+        const box = results[0].detection.box;
+        if (box.width < video.videoWidth * 0.22
+            || box.height < video.videoHeight * 0.22) {
+            return null;
+        }
+        return results[0];
+    }
+
+    async function completeLivenessChallenge() {
+        const deadline = Date.now() + 25000;
+        let openFrames = 0;
+        let sawClosedEyes = false;
+        let blinkPassed = false;
+        let centerNose = null;
+        let turnPassed = false;
+
+        while (Date.now() < deadline) {
+            const result = await detectLiveFace();
+            if (!result) {
+                status.textContent = "Show exactly one face, centered and close to the camera.";
+                await delay(180);
+                continue;
+            }
+
+            const landmarks = result.landmarks;
+            const eyeRatio = (
+                eyeAspectRatio(landmarks.getLeftEye())
+                + eyeAspectRatio(landmarks.getRightEye())
+            ) / 2;
+            const nose = nosePosition(landmarks);
+
+            if (centerNose === null && eyeRatio > 0.20) {
+                openFrames++;
+                if (openFrames >= 3) centerNose = nose;
+            }
+
+            if (!blinkPassed) {
+                status.textContent = "Liveness check 1 of 2: blink once.";
+                if (eyeRatio < 0.17) sawClosedEyes = true;
+                if (sawClosedEyes && eyeRatio > 0.20) blinkPassed = true;
+                await delay(180);
+                continue;
+            }
+
+            const turnAmount = centerNose === null ? 0 : Math.abs(nose - centerNose);
+            if (!turnPassed) {
+                status.textContent = "Liveness check 2 of 2: turn your head to either side.";
+                if (turnAmount > 0.10) turnPassed = true;
+                await delay(180);
+                continue;
+            }
+
+            status.textContent = "Return your face to the center.";
+            if (turnAmount < 0.05 && eyeRatio > 0.20) return result;
+            await delay(180);
+        }
+
+        throw new Error("Liveness verification timed out. Keep one face visible, blink, then turn your head and return to center.");
+    }
+
+    async function captureFrame() {
         if (!video.videoWidth) {
             status.textContent = "Camera not ready yet, try again.";
+            return;
+        }
+
+        captureBtn.disabled = true;
+        status.textContent = "Starting liveness verification…";
+
+        let verifiedFace;
+        try {
+            await loadModels();
+            if (requiresIdentityVerification()) {
+                verifiedFace = await completeLivenessChallenge();
+            } else {
+                verifiedFace = await detectLiveFace();
+                if (!verifiedFace) {
+                    throw new Error("Show exactly one clear face in the camera.");
+                }
+            }
+        } catch (err) {
+            console.warn("Liveness verification failed", err);
+            status.textContent = err && err.message
+                ? err.message
+                : "Liveness verification failed. Please try again.";
+            captureBtn.disabled = false;
             return;
         }
 
@@ -112,143 +281,19 @@
         ctx.scale(-1, 1);
         ctx.drawImage(video, 0, 0, cw, ch);
 
-        // Lock controls while we run the (potentially async) face check.
-        captureBtn.disabled = true;
-        status.textContent = "Checking that we can see your face…";
+        lastDataUrl = canvas.toDataURL("image/jpeg", 0.78);
+        lastDescriptor = Array.from(verifiedFace.descriptor);
+        livenessPassed = true;
+        preview.src = lastDataUrl;
 
-        detectFace(canvas).then((result) => {
-            captureBtn.disabled = false;
-            if (!result.ok) {
-                status.textContent = result.message
-                    || "We couldn't see a clear face. Please face the camera in good light and try again.";
-                // Don't reveal the preview — the user must retry capture.
-                return;
-            }
-
-            lastDataUrl = canvas.toDataURL("image/jpeg", 0.78);
-            preview.src = lastDataUrl;
-
-            video.hidden = true;
-            preview.hidden = false;
-            overlay.hidden = true;
-            captureBtn.hidden = true;
-            retakeBtn.hidden = false;
-            confirmBtn.hidden = false;
-            status.textContent = "Looks good. Click Confirm to submit, or Retake to try again.";
-        }).catch((err) => {
-            console.warn("Face check failed", err);
-            captureBtn.disabled = false;
-            // Don't block the user if our detector itself errors out — fall
-            // back to accepting the frame so a broken heuristic can't make
-            // clocking in impossible.
-            lastDataUrl = canvas.toDataURL("image/jpeg", 0.78);
-            preview.src = lastDataUrl;
-            video.hidden = true;
-            preview.hidden = false;
-            overlay.hidden = true;
-            captureBtn.hidden = true;
-            retakeBtn.hidden = false;
-            confirmBtn.hidden = false;
-            status.textContent = "Captured. Click Confirm to submit, or Retake to try again.";
-        });
-    }
-
-    // ----- Face detection -------------------------------------------------
-    // We try the native Shape Detection API first (Chrome/Edge on Android,
-    // some desktop builds behind a flag) because it's the cheapest and most
-    // accurate option. When it's not available we fall back to a simple
-    // skin-tone heuristic over the center region of the frame: enough to
-    // catch "the camera is pointed at the ceiling" or "the lens is covered"
-    // without pulling in a 1MB ML model.
-    async function detectFace(srcCanvas) {
-        try {
-            if (typeof window !== "undefined" && "FaceDetector" in window) {
-                const detector = new window.FaceDetector({ fastMode: true, maxDetectedFaces: 2 });
-                const faces = await detector.detect(srcCanvas);
-                if (faces && faces.length > 0) {
-                    return { ok: true };
-                }
-                return {
-                    ok: false,
-                    message: "We couldn't see your face. Please center your face in the frame, make sure it's well lit, and try again.",
-                };
-            }
-        } catch (err) {
-            // Some browsers expose FaceDetector but throw when used (e.g.
-            // missing platform support). Fall through to the heuristic.
-            console.warn("FaceDetector unavailable, using fallback", err);
-        }
-
-        return heuristicFaceCheck(srcCanvas);
-    }
-
-    function heuristicFaceCheck(srcCanvas) {
-        const ctx = srcCanvas.getContext("2d");
-        const w = srcCanvas.width;
-        const h = srcCanvas.height;
-        // Sample the central 60% of the frame — where a face should be.
-        const cx = Math.floor(w * 0.20);
-        const cy = Math.floor(h * 0.15);
-        const cw = Math.floor(w * 0.60);
-        const ch = Math.floor(h * 0.70);
-
-        let data;
-        try {
-            data = ctx.getImageData(cx, cy, cw, ch).data;
-        } catch (err) {
-            // CORS-tainted canvas etc. — accept the frame, the server still
-            // validates the photo bytes.
-            return { ok: true };
-        }
-
-        let total = 0;
-        let skin = 0;
-        let bright = 0;
-        let lumaSum = 0;
-        // Step over pixels in 4-pixel strides for speed.
-        for (let i = 0; i < data.length; i += 16) {
-            const r = data[i];
-            const g = data[i + 1];
-            const b = data[i + 2];
-            total++;
-
-            // Rec. 601 luma — covers most cases for "is this frame dark?".
-            const luma = 0.299 * r + 0.587 * g + 0.114 * b;
-            lumaSum += luma;
-            if (luma > 40) bright++;
-
-            // Loose skin-tone band that works across a range of skin colors
-            // under typical webcam lighting. This is intentionally permissive
-            // — we only need to reject "no person at all" frames.
-            const maxC = Math.max(r, g, b);
-            const minC = Math.min(r, g, b);
-            const isSkin =
-                r > 70 && g > 35 && b > 20
-                && (maxC - minC) > 12
-                && Math.abs(r - g) > 10
-                && r > g && r > b;
-            if (isSkin) skin++;
-        }
-
-        if (total === 0) return { ok: true };
-
-        const avgLuma = lumaSum / total;
-        const skinRatio = skin / total;
-        const brightRatio = bright / total;
-
-        if (avgLuma < 25 || brightRatio < 0.20) {
-            return {
-                ok: false,
-                message: "The frame looks very dark. Please move to better lighting and try again.",
-            };
-        }
-        if (skinRatio < 0.04) {
-            return {
-                ok: false,
-                message: "We couldn't see a face in the frame. Please face the camera and try again.",
-            };
-        }
-        return { ok: true };
+        captureBtn.disabled = false;
+        video.hidden = true;
+        preview.hidden = false;
+        overlay.hidden = true;
+        captureBtn.hidden = true;
+        retakeBtn.hidden = false;
+        confirmBtn.hidden = false;
+        status.textContent = "Face and liveness verified. Click Confirm to submit.";
     }
 
     function submitWithPhoto() {
@@ -268,6 +313,27 @@
         const form = currentForm;
         const hidden = form.querySelector('input[name="photo"]');
         if (hidden) hidden.value = lastDataUrl;
+        if (!lastDescriptor || !livenessPassed) {
+            status.textContent = "Complete face and liveness verification before submitting.";
+            return;
+        }
+
+        function setHidden(name, value) {
+            let input = form.querySelector(`input[name="${name}"]`);
+            if (!input) {
+                input = document.createElement("input");
+                input.type = "hidden";
+                input.name = name;
+                form.appendChild(input);
+            }
+            input.value = value;
+        }
+        if (requiresIdentityVerification()) {
+            setHidden("face_descriptor", JSON.stringify(lastDescriptor));
+            setHidden("reference_descriptor",
+                referenceDescriptor ? JSON.stringify(referenceDescriptor) : "");
+            setHidden("liveness_proof", "blink-turn-v1");
+        }
 
         // Geolocation: attach lat/lng/accuracy when the user permits it.
         // Onsite Coalition check-ins are validated against configured
@@ -305,7 +371,7 @@
             subtitle.textContent = "One last selfie before we close out your shift.";
         } else {
             modal.querySelector("#selfie-modal-title").textContent = "Selfie for check-in";
-            subtitle.textContent = "Look at the camera, then click Capture.";
+            subtitle.textContent = "Verify your identity by blinking and turning your head.";
         }
 
         openModal();

@@ -5,12 +5,9 @@
     ViewData["Title"] = "Reminders";
     var viewer = ViewData["ViewerUser"] as User;
     var tz = (ViewData["TzLabel"] as string) ?? "PHT";
-    var viewerOffset = UserClock.DisplayOffset(viewer);
     DateTime ToViewerLocal(DateTime utc)
     {
-        var v = utc.Kind == DateTimeKind.Unspecified
-            ? DateTime.SpecifyKind(utc, DateTimeKind.Utc) : utc;
-        return new DateTimeOffset(v).ToOffset(viewerOffset).DateTime;
+        return UserClock.ToLocal(viewer, utc).DateTime;
     }
 
     string TabCls(string key) => Model.Filter == key ? "subtab subtab-active" : "subtab";

@@ -137,7 +137,7 @@
                     @for (var i = 0; i < totalDays; i++)
                     {
                         var d = Model.WeekStart.AddDays(i);
-                        var isToday = d == PhTime.Today;
+                        var isToday = d == UserClock.TodayFor(ViewData["ViewerUser"] as User);
                         <th class="@(isToday ? "is-today" : "")">
                             @shortDays[i % 7]
                             <div><small class="muted">@d.ToString("MMM d")</small></div>
@@ -164,7 +164,7 @@
                             {
                                 var att = wr.Days[i];
                                 var d = Model.WeekStart.AddDays(i);
-                                var isToday = d == PhTime.Today;
+                                var isToday = d == UserClock.TodayFor(ViewData["ViewerUser"] as User);
                                 <td class="@(isToday ? "is-today" : "")">
                                     @if (att is null)
                                     {

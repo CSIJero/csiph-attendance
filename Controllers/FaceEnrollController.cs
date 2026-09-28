@@ -10,9 +10,8 @@ namespace AttendanceMonitoring.Controllers;
 
 /// <summary>
 /// Self-service face enrollment. Users capture a single reference
-/// selfie which is hashed via <see cref="FaceHash.Compute"/> and
-/// stored on their account. Subsequent check-in selfies are compared
-/// against this reference to flag potential proxy clock-ins.
+/// selfie whose image hash and face embedding are stored on their account.
+/// Subsequent live check-in selfies must match this reference.
 /// </summary>
 [Authorize]
 [Route("profile/face")]
@@ -47,7 +46,8 @@ public class FaceEnrollController : AppController
 
         return View(new FaceEnrollVm
         {
-            IsEnrolled = !string.IsNullOrEmpty(me.FaceHash),
+            IsEnrolled = !string.IsNullOrEmpty(me.FaceHash)
+                && FaceDescriptor.TryParse(me.FaceDescriptor, out _),
             EnrolledAt = me.FaceEnrolledAt,
             RecentSelfies = recent,
         });
@@ -55,7 +55,9 @@ public class FaceEnrollController : AppController
 
     [HttpPost("enroll")]
     [ValidateAntiForgeryToken]
-    public async Task<IActionResult> Enroll([FromForm] string? photo)
+    public async Task<IActionResult> Enroll(
+        [FromForm] string? photo,
+        [FromForm] string? descriptor)
     {
         var me = await GetCurrentUserAsync();
         if (me is null) return Challenge();
@@ -67,7 +69,7 @@ public class FaceEnrollController : AppController
         }
 
         var hash = FaceHash.Compute(photo);
-        if (hash is null)
+        if (hash is null || !FaceDescriptor.TryParse(descriptor, out var parsedDescriptor))
         {
             TempData.Flash(
                 "Could not analyse the photo. Please retake in better lighting.",
@@ -76,6 +78,7 @@ public class FaceEnrollController : AppController
         }
 
         me.FaceHash = hash;
+        me.FaceDescriptor = FaceDescriptor.Serialize(parsedDescriptor);
         me.FaceEnrolledAt = DateTime.UtcNow;
         await Db.SaveChangesAsync();
         TempData.Flash("Face profile updated.", "success");
@@ -89,7 +92,9 @@ public class FaceEnrollController : AppController
     /// </summary>
     [HttpPost("enroll-from-history")]
     [ValidateAntiForgeryToken]
-    public async Task<IActionResult> EnrollFromHistory([FromForm] int attendanceId)
+    public async Task<IActionResult> EnrollFromHistory(
+        [FromForm] int attendanceId,
+        [FromForm] string? descriptor)
     {
         var me = await GetCurrentUserAsync();
         if (me is null) return Challenge();
@@ -103,7 +108,7 @@ public class FaceEnrollController : AppController
         }
 
         var hash = FaceHash.Compute(row.CheckInPhoto);
-        if (hash is null)
+        if (hash is null || !FaceDescriptor.TryParse(descriptor, out var parsedDescriptor))
         {
             TempData.Flash(
                 "Could not analyse that selfie. Please pick another or capture a new photo.",
@@ -112,6 +117,7 @@ public class FaceEnrollController : AppController
         }
 
         me.FaceHash = hash;
+        me.FaceDescriptor = FaceDescriptor.Serialize(parsedDescriptor);
         me.FaceEnrolledAt = DateTime.UtcNow;
         await Db.SaveChangesAsync();
         TempData.Flash(
@@ -127,6 +133,7 @@ public class FaceEnrollController : AppController
         var me = await GetCurrentUserAsync();
         if (me is null) return Challenge();
         me.FaceHash = null;
+        me.FaceDescriptor = null;
         me.FaceEnrolledAt = null;
         await Db.SaveChangesAsync();
         TempData.Flash("Face profile cleared.", "success");

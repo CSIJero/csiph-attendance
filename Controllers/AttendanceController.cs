@@ -364,8 +364,8 @@ public class AttendanceController : AppController
         // Pull the target's schedule rows for the range so the view can
         // render an overtime / undertime column without doing per-row
         // lookups. Per-date scheduling — missing dates are "off".
-        var rangeStart = start ?? records.MinBy(r => r.WorkDate)?.WorkDate ?? PhTime.Today;
-        var rangeEnd = end ?? records.MaxBy(r => r.WorkDate)?.WorkDate ?? PhTime.Today;
+        var rangeStart = start ?? records.MinBy(r => r.WorkDate)?.WorkDate ?? UserClock.TodayFor(target);
+        var rangeEnd = end ?? records.MaxBy(r => r.WorkDate)?.WorkDate ?? UserClock.TodayFor(target);
         var scheduleByDate = await Db.ScheduleEntries
             .Where(s => s.UserId == target.Id && s.WorkDate >= rangeStart && s.WorkDate <= rangeEnd)
             .ToDictionaryAsync(s => s.WorkDate);
@@ -534,6 +534,9 @@ public class AttendanceController : AppController
         [FromForm(Name = "lat")] double? lat = null,
         [FromForm(Name = "lng")] double? lng = null,
         [FromForm(Name = "accuracy")] double? accuracy = null,
+        [FromForm(Name = "face_descriptor")] string? faceDescriptor = null,
+        [FromForm(Name = "reference_descriptor")] string? referenceDescriptor = null,
+        [FromForm(Name = "liveness_proof")] string? livenessProof = null,
         [FromForm(Name = "activity_tag")] string? activityTag = null)
     {
         var me = await GetCurrentUserAsync();
@@ -612,7 +615,7 @@ public class AttendanceController : AppController
             }
         }
 
-        var today = PhTime.Today;
+        var today = UserClock.TodayFor(me);
         // For non-Support, non-admin users the policy may redirect this
         // clock-in to tomorrow's calendar date (cross-midnight grace).
         // Fall back to today for admins / Support / force-overrides.
@@ -695,39 +698,79 @@ public class AttendanceController : AppController
             }
         }
 
-        // ----- Face hash check (best-effort) -------------------------
-        // Compute a perceptual hash of the submitted selfie and compare
-        // against the enrolled hash on the user record. Mismatches do
-        // NOT block check-ins — they are recorded so admins can audit.
-        //
-        // First-time auto-enrollment: when the user has no FaceHash yet
-        // we treat THIS selfie as the enrollment photo. The status is
-        // recorded as "AutoEnrolled" so admins can see which row was
-        // used as the seed. Future check-ins compare against it.
+        // ----- Face identity check -----------------------------------
+        if (!string.Equals(livenessProof, "blink-turn-v1", StringComparison.Ordinal)
+            || !FaceDescriptor.TryParse(faceDescriptor, out var capturedDescriptor))
+        {
+            TempData.Flash(
+                "Face liveness verification was not completed. Please blink and turn your head when prompted.",
+                "warning");
+            return RedirectToAction("Index", "Dashboard");
+        }
+
+        var hasEnrolledDescriptor = FaceDescriptor.TryParse(
+            me.FaceDescriptor,
+            out var enrolledDescriptor);
+        if (string.IsNullOrEmpty(me.FaceHash) || !hasEnrolledDescriptor)
+        {
+            var lastSelfie = await Db.Attendances
+                .Where(a => a.UserId == me.Id
+                    && a.CheckInPhoto != null
+                    && a.CheckInPhoto != "")
+                .OrderByDescending(a => a.CheckIn)
+                .Select(a => a.CheckInPhoto)
+                .FirstOrDefaultAsync();
+            var enrolledHash = FaceHash.Compute(lastSelfie);
+            if (enrolledHash is null)
+            {
+                TempData.Flash(
+                    "No usable previous selfie was found. Please enroll your face profile before checking in.",
+                    "warning");
+                return RedirectToAction("Index", "FaceEnroll");
+            }
+
+            if (!hasEnrolledDescriptor
+                && !FaceDescriptor.TryParse(referenceDescriptor, out enrolledDescriptor))
+            {
+                TempData.Flash(
+                    "Your previous selfie could not be converted into a face profile. Please enroll manually.",
+                    "warning");
+                return RedirectToAction("Index", "FaceEnroll");
+            }
+
+            me.FaceHash = enrolledHash;
+            me.FaceDescriptor = FaceDescriptor.Serialize(enrolledDescriptor);
+            me.FaceEnrolledAt = DateTime.UtcNow;
+            await Db.SaveChangesAsync();
+        }
+
+        var descriptorDistance = FaceDescriptor.Distance(
+            enrolledDescriptor,
+            capturedDescriptor);
+        if (descriptorDistance > FaceDescriptor.MaximumEuclideanDistance)
+        {
+            TempData.Flash(
+                "Face verification did not match your enrolled profile. Please retake the selfie or update your face profile.",
+                "error");
+            return RedirectToAction("Index", "Dashboard");
+        }
+
         var newHash = FaceHash.Compute(safePhoto);
-        string? faceStatus = null;
-        int? faceDistance = null;
-        if (string.IsNullOrEmpty(me.FaceHash))
+        if (newHash is null)
         {
-            if (newHash is not null)
-            {
-                me.FaceHash = newHash;
-                me.FaceEnrolledAt = DateTime.UtcNow;
-                faceStatus = "AutoEnrolled";
-            }
-            else
-            {
-                faceStatus = "NotEnrolled";
-            }
+            TempData.Flash(
+                "The captured selfie could not be analysed. Please retake it in good lighting.",
+                "warning");
+            return RedirectToAction("Index", "Dashboard");
         }
-        else if (newHash is null)
+
+        var faceDistance = FaceHash.Distance(me.FaceHash, newHash);
+        if (faceDistance > Constants.FaceMatchMaxDistance)
         {
-            faceStatus = "Unavailable";
-        }
-        else
-        {
-            faceDistance = FaceHash.Distance(me.FaceHash, newHash);
-            faceStatus = faceDistance <= Constants.FaceMatchMaxDistance ? "Match" : "Mismatch";
+            TempData.Flash(
+                "Face verification did not match your enrolled profile. Please retake the selfie or update your face profile.",
+                "error");
+            return RedirectToAction("Index", "Dashboard");
         }
 
         // Normalise the activity tag — trim and cap at 64 chars, drop
@@ -747,15 +790,12 @@ public class AttendanceController : AppController
             CheckInAccuracy = accuracy,
             CheckInSiteId = checkInSiteId,
             ActivityTag = safeTag,
-            FaceMatchStatus = faceStatus,
+            FaceMatchStatus = "Match",
             FaceMatchDistance = faceDistance,
         });
         await Db.SaveChangesAsync();
 
-        var flash = "Checked in. Have a productive day!";
-        if (faceStatus == "Mismatch")
-            flash += " (Face check raised a flag — please re-enroll if this is unexpected.)";
-        TempData.Flash(flash, faceStatus == "Mismatch" ? "warning" : "success");
+        TempData.Flash("Checked in. Have a productive day!", "success");
         return RedirectToAction("Index", "Dashboard");
     }
 
@@ -949,15 +989,9 @@ public class AttendanceController : AppController
     }
 
     /// <summary>
-    /// Parses a <c>&lt;input type="datetime-local"&gt;</c> value (always in the
-    /// user's local timezone, here PHT) back into a UTC <see cref="DateTime"/>.
-    /// Accepts both <c>yyyy-MM-ddTHH:mm</c> and <c>yyyy-MM-ddTHH:mm:ss</c>.
-    /// </summary>
-    /// <summary>
-    /// Region-aware parser for the HTML <c>datetime-local</c> input
-    /// format. Treats the supplied wall-clock value as being in the
-    /// user's local zone (IST for India BUs, PHT otherwise) and
-    /// converts it to UTC for storage.
+    /// Parses an HTML <c>datetime-local</c> value in the user's captured
+    /// timezone and converts it to UTC for storage. Invalid DST gap times
+    /// are rejected instead of being silently shifted.
     /// </summary>
     private static bool TryParseUserDateTime(User? user, string raw, out DateTime utc)
     {
@@ -970,8 +1004,11 @@ public class AttendanceController : AppController
         {
             return false;
         }
-        utc = DateTime.SpecifyKind(local - UserClock.DisplayOffset(user), DateTimeKind.Utc);
-        return true;
+        return UserClock.TryConvertLocalToUtc(
+            user,
+            local,
+            out utc,
+            useDisplayZone: true);
     }
 
     /// <summary>
@@ -1150,22 +1187,22 @@ public class AttendanceController : AppController
     {
         const int graceMinutesBefore = 60;
 
-        var today = PhTime.Today;
-        var nowPh = PhTime.Now;
+        var today = UserClock.TodayFor(me);
+        var nowLocal = UserClock.NowFor(me);
         var schedYesterday = await DbInitializer.GetScheduleForDateAsync(Db, me, today.AddDays(-1));
         var schedToday     = await DbInitializer.GetScheduleForDateAsync(Db, me, today);
         var schedTomorrow  = await DbInitializer.GetScheduleForDateAsync(Db, me, today.AddDays(1));
 
         // Currently inside today's shift window?
         if (schedToday is { IsWorking: true, StartTime: not null, EndTime: not null }
-            && schedToday.CoversLocal(nowPh.DateTime))
+            && schedToday.CoversLocal(nowLocal.DateTime))
         {
             return new ClockInPolicy(true, false, null, today);
         }
 
         // Yesterday's overnight shift (e.g. 22:00 -> 06:00) may still be
         // covering today's early hours.
-        if (schedYesterday?.CoversLocal(nowPh.DateTime) == true)
+        if (schedYesterday?.CoversLocal(nowLocal.DateTime) == true)
         {
             return new ClockInPolicy(true, false, null, today.AddDays(-1));
         }
@@ -1176,7 +1213,7 @@ public class AttendanceController : AppController
         if (schedToday is { IsWorking: true, StartTime: { } stT })
         {
             var startPh = today.ToDateTime(stT);
-            if (startPh > nowPh.DateTime)
+            if (startPh > nowLocal.DateTime)
             {
                 nextStartPh = startPh;
                 nextStartDate = today;
@@ -1203,7 +1240,7 @@ public class AttendanceController : AppController
               EffectiveWorkDate: today);
         }
 
-        var minutesEarly = (nextStartPh.Value - nowPh.DateTime).TotalMinutes;
+        var minutesEarly = (nextStartPh.Value - nowLocal.DateTime).TotalMinutes;
         if (minutesEarly <= graceMinutesBefore)
         {
             // Inside the 60-minute pre-shift grace: silent allow.
@@ -1221,7 +1258,7 @@ public class AttendanceController : AppController
             Allowed: true,
             AllowForceOverride: false,
             Message: $"Heads-up: your next shift starts at "
-                   + $"{when:HH\\:mm} PHT {whenLabel}. You're clocking in early.",
+                   + $"{when:HH\\:mm} {UserClock.Label(me)} {whenLabel}. You're clocking in early.",
             EffectiveWorkDate: nextStartDate);
     }
 

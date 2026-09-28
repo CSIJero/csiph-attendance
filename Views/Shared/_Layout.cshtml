@@ -22,7 +22,7 @@
     // The viewer user is resolved in _ViewStart and stashed on ViewData.
     var layoutViewer = ViewData["ViewerUser"] as AttendanceMonitoring.Models.User;
     var layoutTz = (ViewData["TzLabel"] as string) ?? "PHT";
-    var nowViewer = DateTimeOffset.UtcNow.ToOffset(UserClock.DisplayOffset(layoutViewer));
+    var nowViewer = UserClock.NowFor(layoutViewer);
     var flashes = TempData.ConsumeFlashes();
 
     // ---- Deployment banner / modal --------------------------------------
@@ -503,7 +503,9 @@
     {
         @await Html.PartialAsync("_SelfieModal")
         <script src="~/js/app.js" asp-append-version="true"></script>
+        <script src="~/vendor/face-api/face-api.js" asp-append-version="true"></script>
         <script src="~/js/selfie.js" asp-append-version="true"></script>
+        <script src="~/js/face-enroll.js" asp-append-version="true"></script>
         @* Mobile sidebar toggle — opens/closes the slide-in sidebar on
            narrow viewports. Pure inline so it works even if app.js
            hasn't finished loading. *@

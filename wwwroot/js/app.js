@@ -7,7 +7,7 @@
 
     // Client-tracked presence. Sent on every heartbeat so the server
     // knows whether the user is Online, on a break, or Offline (Windows
-    // locked, tab closing, or five minutes without keyboard/mouse input).
+    // locked or the tab/browser closing).
     // Minimizing and switching tabs are not state changes by themselves.
     // tabs is NOT a state change — the user is still "online".
     let currentState = "online";
@@ -318,30 +318,28 @@
         }
     }
 
-    const PH_TZ = "Asia/Manila";
-    const phDateTimeFmt = new Intl.DateTimeFormat("en-CA", {
-        timeZone: PH_TZ,
+    const localDateTimeFmt = new Intl.DateTimeFormat("en-CA", {
         year: "numeric", month: "2-digit", day: "2-digit",
         hour: "2-digit", minute: "2-digit",
         hour12: false,
+        timeZoneName: "short",
     });
-    const phTimeFmt = new Intl.DateTimeFormat("en-GB", {
-        timeZone: PH_TZ,
+    const localTimeFmt = new Intl.DateTimeFormat("en-GB", {
         hour: "2-digit", minute: "2-digit",
         hour12: false,
+        timeZoneName: "short",
     });
 
     function fmtTime(iso) {
         if (!iso) return "never";
         const d = new Date(iso);
-        // en-CA gives "YYYY-MM-DD, HH:MM" — normalize to "YYYY-MM-DD HH:MM PHT"
-        const s = phDateTimeFmt.format(d).replace(",", "");
-        return `${s} PHT`;
+        const s = localDateTimeFmt.format(d).replace(",", "");
+        return s;
     }
 
     function fmtHHMM(iso) {
         if (!iso) return "";
-        return phTimeFmt.format(new Date(iso));
+        return localTimeFmt.format(new Date(iso));
     }
 
     // Mirror C# PhTime.FormatDurationMinutes — renders an attendance
@@ -557,7 +555,7 @@
 
             const stamp = document.getElementById("last-refresh");
             if (stamp) {
-                stamp.textContent = `updated ${phTimeFmt.format(new Date())} PHT`;
+                stamp.textContent = `updated ${localTimeFmt.format(new Date())}`;
             }
         } catch (err) {
             console.warn("refresh failed", err);
@@ -825,7 +823,7 @@
 
     // -------------------------------------------------------------------
     // Presence policy: Online unless Windows is locked, the browser closes,
-    // the user logs out, or keyboard/mouse input is idle for five minutes.
+    // or the user logs out.
     // -------------------------------------------------------------------
     // We treat the user as Online whenever a heartbeat is landing. There
     // is no "Away" tier — being away from the keyboard while the screen
@@ -864,50 +862,15 @@
     }
     startWatchdog();
 
-    // Browser-observed keyboard and mouse activity provides an inactivity
-    // fallback when the system-wide Idle Detection API is unavailable.
-    // The Idle Detection API remains preferred because it observes input
-    // across applications, not only inside this browser page.
-    let lastInputAt = Date.now();
-    let inputInactivityTimer = null;
-
-    function markInactive() {
-        if (currentState === "lunch"
-            || currentState === "break"
-            || currentOfflineReason === "locked"
-            || currentOfflineReason === "logout"
-            || currentOfflineReason === "browser_closed") return;
-        if (currentState !== "offline" || currentOfflineReason !== "inactive") {
-            currentState = "offline";
-            currentOfflineReason = "inactive";
-            setSelfDot("offline");
-            sendOffline("inactive", false);
-            refreshDashboard();
-        }
-    }
-
     function recordInputActivity() {
-        lastInputAt = Date.now();
+        // Recover sessions left offline by an older cached client that still
+        // treated an unlocked but idle workstation as offline.
         if (currentState === "offline" && currentOfflineReason === "inactive") {
             currentOfflineReason = null;
             setState("online");
             refreshDashboard();
         }
     }
-
-    for (const eventName of ["pointermove", "pointerdown", "keydown", "wheel", "touchstart"]) {
-        window.addEventListener(eventName, recordInputActivity, { passive: true });
-    }
-    inputInactivityTimer = setInterval(() => {
-        // Page-scoped input events stop when the browser is minimized or the
-        // user works in another application. Only infer inactivity while this
-        // page is visible; IdleDetector handles system-wide idle when allowed.
-        if (!idleDetector
-            && document.visibilityState === "visible"
-            && Date.now() - lastInputAt >= IDLE_THRESHOLD_MS) {
-            markInactive();
-        }
-    }, 15000);
 
     // Kick things off
     heartbeatWorker = createHeartbeatWorker();
@@ -943,9 +906,8 @@
     //   * userState   = "active" | "idle"       -> no input across all apps
     //
     // Policy applied here:
-    //   IF screenState === locked              -> OFFLINE (locked)
-    //   ELSE IF userState === idle             -> OFFLINE (inactive)
-    //   ELSE                                   -> ONLINE
+    //   IF screenState === locked -> OFFLINE (locked)
+    //   ELSE                      -> ONLINE
     //
     // Requires HTTPS + a user gesture to request permission. When the API
     // is unavailable or denied, we stay in "online" mode and rely on the
@@ -972,11 +934,9 @@
                 setSelfDot("offline");
             }
             sendOffline("locked", false);
-        } else if (detector.userState === "idle") {
-            markInactive();
         } else {
-            lastInputAt = Date.now();
-            // Screen unlocked with active input → Online.
+            // An unlocked screen remains Online even when the Idle Detection
+            // API reports no recent input.
             if (currentState === "offline") startTimers();
             if (currentState === "offline"
                 && (currentOfflineReason === "locked"

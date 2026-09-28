@@ -48,6 +48,7 @@ public static class DbInitializer
         await EnsureRoleDefinitionTierColumnsAsync(db);
         await SeedBuiltInRoleDefinitionsAsync(db);
         await EnsureBusinessUnitsColumnAsync(db);
+        await EnsureTimeZoneIdColumnAsync(db);
         await EnsureLastLoginLocationColumnAsync(db);
         await EnsureLastLoginAgentColumnAsync(db);
         await EnsureLastLoginGpsColumnsAsync(db);
@@ -82,7 +83,7 @@ public static class DbInitializer
         // DateTime as ISO text, so no schema change is needed there.
         await EnsureLeaveRequestDateTimeColumnsAsync(db);
 
-        // FaceHash / FaceEnrolledAt must exist before any user query below
+        // FaceHash / FaceDescriptor / FaceEnrolledAt must exist before any user query below
         // (for example RemoveDemoAccountAsync) because EF selects mapped
         // columns even when the calling code does not read them directly.
         // Run this early so legacy Postgres schemas are patched first.
@@ -1048,6 +1049,25 @@ public static class DbInitializer
         }
     }
 
+    private static async Task EnsureTimeZoneIdColumnAsync(AppDbContext db)
+    {
+        if (db.Database.IsNpgsql())
+        {
+            await db.Database.ExecuteSqlRawAsync(
+                "ALTER TABLE users ADD COLUMN IF NOT EXISTS \"TimeZoneId\" VARCHAR(100) NULL;");
+            return;
+        }
+
+        if (!db.Database.IsSqlite()) return;
+
+        var existing = await GetColumnsAsync(db, "users");
+        if (!existing.Contains("TimeZoneId"))
+        {
+            await db.Database.ExecuteSqlRawAsync(
+                "ALTER TABLE users ADD COLUMN TimeZoneId TEXT NULL;");
+        }
+    }
+
     /// <summary>
     /// One-shot data normalisation: rewrite any legacy <c>BusinessUnit</c>
     /// values that still use the long "(India)" suffix to the ISO-3166
@@ -1817,7 +1837,7 @@ public static class DbInitializer
             await db.Database.ExecuteSqlRawAsync("ALTER TABLE attendance ADD COLUMN FaceMatchDistance INTEGER NULL;");
     }
 
-    /// <summary>Adds <c>FaceHash</c> and <c>FaceEnrolledAt</c> to <c>users</c>.</summary>
+    /// <summary>Adds face-verification columns to <c>users</c>.</summary>
     private static async Task EnsureIsActiveColumnAsync(AppDbContext db)
     {
         if (db.Database.IsNpgsql())
@@ -1870,6 +1890,8 @@ public static class DbInitializer
             await db.Database.ExecuteSqlRawAsync(
                 "ALTER TABLE users ADD COLUMN IF NOT EXISTS \"FaceHash\" VARCHAR(32) NULL;");
             await db.Database.ExecuteSqlRawAsync(
+                "ALTER TABLE users ADD COLUMN IF NOT EXISTS \"FaceDescriptor\" VARCHAR(8192) NULL;");
+            await db.Database.ExecuteSqlRawAsync(
                 "ALTER TABLE users ADD COLUMN IF NOT EXISTS \"FaceEnrolledAt\" TIMESTAMP NULL;");
             return;
         }
@@ -1877,6 +1899,8 @@ public static class DbInitializer
         var cols = await GetColumnsAsync(db, "users");
         if (!cols.Contains("FaceHash"))
             await db.Database.ExecuteSqlRawAsync("ALTER TABLE users ADD COLUMN FaceHash TEXT NULL;");
+        if (!cols.Contains("FaceDescriptor"))
+            await db.Database.ExecuteSqlRawAsync("ALTER TABLE users ADD COLUMN FaceDescriptor TEXT NULL;");
         if (!cols.Contains("FaceEnrolledAt"))
             await db.Database.ExecuteSqlRawAsync("ALTER TABLE users ADD COLUMN FaceEnrolledAt TEXT NULL;");
     }

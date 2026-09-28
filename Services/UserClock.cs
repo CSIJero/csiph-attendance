@@ -8,18 +8,21 @@ using Microsoft.EntityFrameworkCore;
 namespace AttendanceMonitoring.Services;
 
 /// <summary>
-/// Per-user local-time helpers. Most data in the system is stored in UTC
-/// and displayed in PHT (UTC+8), but users based in India work in IST
-/// (UTC+5:30) and expect the dashboard / shift-evaluation logic to use
-/// their wall clock. Region is inferred from the user's
-/// <see cref="User.BusinessUnit"/> column: any value carrying the
-/// <c>(IN)</c> ISO-3166 alpha-2 suffix (e.g. <c>"BU2 (IN)"</c>) is
-/// treated as India; everything else falls back to PHT.
+/// Per-user local-time helpers. Timestamps are stored in UTC while attendance
+/// dates, schedules, and display values use the IANA timezone captured from
+/// the browser at login. Legacy users without a captured timezone retain the
+/// previous India/PHT business-unit fallback until their next login.
 /// </summary>
 public static class UserClock
 {
     public static readonly TimeSpan PhOffset = TimeSpan.FromHours(8);
     public static readonly TimeSpan InOffset = new(5, 30, 0);
+    private static readonly TimeZoneInfo PhZone = ResolveZoneOrFallback(
+        "Asia/Manila",
+        TimeZoneInfo.CreateCustomTimeZone("PHT", PhOffset, "PHT", "PHT"));
+    private static readonly TimeZoneInfo InZone = ResolveZoneOrFallback(
+        "Asia/Kolkata",
+        TimeZoneInfo.CreateCustomTimeZone("IST", InOffset, "IST", "IST"));
 
     /// <summary>
     /// Wired from <c>Program.cs</c>. Lets the static helpers reach the
@@ -57,6 +60,9 @@ public static class UserClock
         return (TimeSpan.FromMinutes(minutes), ianaPart);
     }
 
+    public static bool IsValidTimeZoneId(string? timeZoneId) =>
+        TryFindZone(timeZoneId, out _);
+
     /// <summary>True when the user is part of an India Business Unit.</summary>
     public static bool IsIndia(User? user)
     {
@@ -66,14 +72,17 @@ public static class UserClock
     }
 
     /// <summary>
-    /// The user's logical local UTC offset — derived strictly from their
-    /// <see cref="User.BusinessUnit"/>. Used by server-side logic that
-    /// must always evaluate against the employee's actual wall clock
-    /// (shift cut-offs, late-arrival checks, the offline notifier),
-    /// regardless of who is viewing.
+    /// The employee's timezone. A validated browser-reported IANA timezone
+    /// wins; legacy accounts fall back to their business-unit timezone.
     /// </summary>
-    public static TimeSpan OffsetFor(User? user)
-        => IsIndia(user) ? InOffset : PhOffset;
+    public static TimeZoneInfo ZoneFor(User? user)
+    {
+        if (TryFindZone(user?.TimeZoneId, out var zone)) return zone;
+        return IsIndia(user) ? InZone : PhZone;
+    }
+
+    public static TimeSpan OffsetFor(User? user) =>
+        ZoneFor(user).GetUtcOffset(DateTimeOffset.UtcNow);
 
     /// <summary>
     /// The offset to render timestamps in. When the viewer's browser
@@ -82,11 +91,19 @@ public static class UserClock
     /// the passed user's <see cref="OffsetFor"/> when no cookie is
     /// available (e.g. the very first request, background services).
     /// </summary>
-    public static TimeSpan DisplayOffset(User? user)
+    public static TimeZoneInfo DisplayZone(User? user)
     {
-        if (TryGetBrowserTz() is { } b) return b.Offset;
-        return OffsetFor(user);
+        if (TryFindZone(user?.TimeZoneId, out var userZone)) return userZone;
+        if (TryGetBrowserTz() is { Iana.Length: > 0 } browser
+            && TryFindZone(browser.Iana, out var browserZone))
+        {
+            return browserZone;
+        }
+        return ZoneFor(user);
     }
+
+    public static TimeSpan DisplayOffset(User? user) =>
+        DisplayZone(user).GetUtcOffset(DateTimeOffset.UtcNow);
 
     /// <summary>
     /// Short timezone abbreviation for display. Uses the browser cookie
@@ -94,11 +111,11 @@ public static class UserClock
     /// </summary>
     public static string Label(User? user)
     {
-        if (TryGetBrowserTz() is { } b)
-        {
-            return BrowserLabelFor(b.Offset, b.Iana);
-        }
-        return IsIndia(user) ? "IST" : "PHT";
+        var zone = DisplayZone(user);
+        var nowUtc = DateTime.UtcNow;
+        var offset = zone.GetUtcOffset(nowUtc);
+        return BrowserLabelFor(offset, zone.Id, zone.IsDaylightSavingTime(
+            TimeZoneInfo.ConvertTimeFromUtc(nowUtc, zone)));
     }
 
     /// <summary>
@@ -106,11 +123,17 @@ public static class UserClock
     /// well-known abbreviation when the IANA name matches a common
     /// region; otherwise falls back to <c>"GMT±HH:MM"</c>.
     /// </summary>
-    internal static string BrowserLabelFor(TimeSpan offset, string iana)
+    internal static string BrowserLabelFor(
+        TimeSpan offset,
+        string iana,
+        bool isDaylightSaving = false)
     {
         if (!string.IsNullOrEmpty(iana))
         {
-            if (KnownAbbreviations.TryGetValue(iana, out var abbr)) return abbr;
+            if (KnownAbbreviations.TryGetValue(iana, out var abbreviations))
+                return isDaylightSaving
+                    ? abbreviations.Daylight
+                    : abbreviations.Standard;
         }
         // GMT±HH:MM fallback (whole-minute precision).
         var sign = offset.Ticks >= 0 ? "+" : "-";
@@ -118,31 +141,41 @@ public static class UserClock
         return $"GMT{sign}{abs.Hours:D2}:{abs.Minutes:D2}";
     }
 
-    private static readonly Dictionary<string, string> KnownAbbreviations =
+    private static readonly Dictionary<string, (string Standard, string Daylight)> KnownAbbreviations =
         new(StringComparer.OrdinalIgnoreCase)
         {
-            ["Asia/Manila"]    = "PHT",
-            ["Asia/Kolkata"]   = "IST",
-            ["Asia/Calcutta"]  = "IST",
-            ["Asia/Singapore"] = "SGT",
-            ["Asia/Hong_Kong"] = "HKT",
-            ["Asia/Tokyo"]     = "JST",
-            ["Asia/Seoul"]     = "KST",
-            ["Asia/Dubai"]     = "GST",
-            ["Australia/Sydney"] = "AEDT",
-            ["Europe/London"]  = "GMT",
-            ["Europe/Paris"]   = "CET",
-            ["Europe/Berlin"]  = "CET",
-            ["America/New_York"] = "EST",
-            ["America/Chicago"]  = "CST",
-            ["America/Denver"]   = "MST",
-            ["America/Los_Angeles"] = "PST",
-            ["UTC"]            = "UTC",
+            ["Asia/Manila"] = ("PHT", "PHT"),
+            ["Asia/Kolkata"] = ("IST", "IST"),
+            ["Asia/Calcutta"] = ("IST", "IST"),
+            ["Asia/Singapore"] = ("SGT", "SGT"),
+            ["Asia/Hong_Kong"] = ("HKT", "HKT"),
+            ["Asia/Tokyo"] = ("JST", "JST"),
+            ["Asia/Seoul"] = ("KST", "KST"),
+            ["Asia/Dubai"] = ("GST", "GST"),
+            ["Australia/Sydney"] = ("AEST", "AEDT"),
+            ["Europe/London"] = ("GMT", "BST"),
+            ["Europe/Paris"] = ("CET", "CEST"),
+            ["Europe/Berlin"] = ("CET", "CEST"),
+            ["America/New_York"] = ("EST", "EDT"),
+            ["America/Chicago"] = ("CST", "CDT"),
+            ["America/Denver"] = ("MST", "MDT"),
+            ["America/Los_Angeles"] = ("PST", "PDT"),
+            ["UTC"] = ("UTC", "UTC"),
+            ["Etc/UTC"] = ("UTC", "UTC"),
         };
 
     /// <summary>Current wall-clock <see cref="DateTimeOffset"/> for the user.</summary>
     public static DateTimeOffset NowFor(User? user)
-        => DateTimeOffset.UtcNow.ToOffset(OffsetFor(user));
+        => TimeZoneInfo.ConvertTime(DateTimeOffset.UtcNow, ZoneFor(user));
+
+    public static DateTimeOffset ToLocal(User? user, DateTime utc)
+    {
+        if (utc.Kind == DateTimeKind.Unspecified)
+            utc = DateTime.SpecifyKind(utc, DateTimeKind.Utc);
+        else if (utc.Kind == DateTimeKind.Local)
+            utc = utc.ToUniversalTime();
+        return TimeZoneInfo.ConvertTime(new DateTimeOffset(utc), ZoneFor(user));
+    }
 
     /// <summary>Today's calendar date in the user's local zone.</summary>
     public static DateOnly TodayFor(User? user)
@@ -158,10 +191,52 @@ public static class UserClock
         var v = utc.Value;
         if (v.Kind == DateTimeKind.Unspecified)
             v = DateTime.SpecifyKind(v, DateTimeKind.Utc);
-        return new DateTimeOffset(v)
-            .ToOffset(DisplayOffset(user))
+        return TimeZoneInfo.ConvertTime(new DateTimeOffset(v), DisplayZone(user))
             .ToString(fmt, CultureInfo.InvariantCulture);
     }
+
+    public static bool TryConvertLocalToUtc(
+        User? user,
+        DateTime local,
+        out DateTime utc,
+        bool useDisplayZone = false)
+    {
+        var zone = useDisplayZone ? DisplayZone(user) : ZoneFor(user);
+        local = DateTime.SpecifyKind(local, DateTimeKind.Unspecified);
+        if (zone.IsInvalidTime(local))
+        {
+            utc = default;
+            return false;
+        }
+
+        utc = TimeZoneInfo.ConvertTimeToUtc(local, zone);
+        return true;
+    }
+
+    public static DateTime StartOfDateUtc(User? user, DateOnly date)
+    {
+        var local = date.ToDateTime(TimeOnly.MinValue);
+        return TimeZoneInfo.ConvertTimeToUtc(
+            DateTime.SpecifyKind(local, DateTimeKind.Unspecified),
+            ZoneFor(user));
+    }
+
+    private static bool TryFindZone(string? timeZoneId, out TimeZoneInfo zone)
+    {
+        zone = null!;
+        if (string.IsNullOrWhiteSpace(timeZoneId)) return false;
+        if (!TimeZoneInfo.TryFindSystemTimeZoneById(timeZoneId.Trim(), out var found))
+            return false;
+        zone = found;
+        return true;
+    }
+
+    private static TimeZoneInfo ResolveZoneOrFallback(
+        string timeZoneId,
+        TimeZoneInfo fallback) =>
+        TimeZoneInfo.TryFindSystemTimeZoneById(timeZoneId, out var zone)
+            ? zone
+            : fallback;
 
     /// <summary>
     /// Razor convenience: look up the signed-in user from the request

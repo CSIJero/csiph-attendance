@@ -245,8 +245,8 @@ else
                 <div class="form-grid">
                     <label>Date
                         <input type="date" name="workDate" required
-                               value="@PhTime.Today.AddDays(1).ToString("yyyy-MM-dd")"
-                               min="@PhTime.Today.ToString("yyyy-MM-dd")" />
+                               value="@UserClock.TodayFor(Model.Me).AddDays(1).ToString("yyyy-MM-dd")"
+                               min="@UserClock.TodayFor(Model.Me).ToString("yyyy-MM-dd")" />
                     </label>
                     <label class="switch-row">
                         <input type="checkbox" name="working" value="true" checked />
