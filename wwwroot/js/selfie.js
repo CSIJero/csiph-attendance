@@ -25,7 +25,7 @@
     let lastDataUrl = null;
     let lastDescriptor = null;
     let referenceDescriptor = null;
-    let livenessPassed = false;
+    let faceVerified = false;
     let modelsPromise = null;
     const modelUrl = "/vendor/face-api/models";
     const detectorOptions = () => new faceapi.TinyFaceDetectorOptions({
@@ -119,7 +119,7 @@
         confirmBtn.hidden = true;
         lastDataUrl = null;
         lastDescriptor = null;
-        livenessPassed = false;
+        faceVerified = false;
         preview.removeAttribute("src");
     }
 
@@ -164,24 +164,6 @@
         }
     }
 
-    function pointDistance(left, right) {
-        return Math.hypot(left.x - right.x, left.y - right.y);
-    }
-
-    function eyeAspectRatio(points) {
-        const vertical = pointDistance(points[1], points[5])
-            + pointDistance(points[2], points[4]);
-        const horizontal = 2 * pointDistance(points[0], points[3]);
-        return horizontal > 0 ? vertical / horizontal : 0;
-    }
-
-    function nosePosition(landmarks) {
-        const jaw = landmarks.getJawOutline();
-        const nose = landmarks.getNose();
-        const width = jaw[16].x - jaw[0].x;
-        return width > 0 ? (nose[3].x - jaw[0].x) / width : 0.5;
-    }
-
     function delay(milliseconds) {
         return new Promise(resolve => setTimeout(resolve, milliseconds));
     }
@@ -201,56 +183,18 @@
         return results[0];
     }
 
-    async function completeLivenessChallenge() {
-        const deadline = Date.now() + 25000;
-        let openFrames = 0;
-        let sawClosedEyes = false;
-        let blinkPassed = false;
-        let centerNose = null;
-        let turnPassed = false;
-
+    async function verifyVisibleFace() {
+        const deadline = Date.now() + 8000;
         while (Date.now() < deadline) {
             const result = await detectLiveFace();
-            if (!result) {
-                status.textContent = "Show exactly one face, centered and close to the camera.";
-                await delay(180);
-                continue;
-            }
-
-            const landmarks = result.landmarks;
-            const eyeRatio = (
-                eyeAspectRatio(landmarks.getLeftEye())
-                + eyeAspectRatio(landmarks.getRightEye())
-            ) / 2;
-            const nose = nosePosition(landmarks);
-
-            if (centerNose === null && eyeRatio > 0.20) {
-                openFrames++;
-                if (openFrames >= 3) centerNose = nose;
-            }
-
-            if (!blinkPassed) {
-                status.textContent = "Liveness check 1 of 2: blink once.";
-                if (eyeRatio < 0.17) sawClosedEyes = true;
-                if (sawClosedEyes && eyeRatio > 0.20) blinkPassed = true;
-                await delay(180);
-                continue;
-            }
-
-            const turnAmount = centerNose === null ? 0 : Math.abs(nose - centerNose);
-            if (!turnPassed) {
-                status.textContent = "Liveness check 2 of 2: turn your head to either side.";
-                if (turnAmount > 0.10) turnPassed = true;
-                await delay(180);
-                continue;
-            }
-
-            status.textContent = "Return your face to the center.";
-            if (turnAmount < 0.05 && eyeRatio > 0.20) return result;
-            await delay(180);
+            if (result) return result;
+            status.textContent =
+                "Show exactly one clear face, centered and close to the camera.";
+            await delay(250);
         }
 
-        throw new Error("Liveness verification timed out. Keep one face visible, blink, then turn your head and return to center.");
+        throw new Error(
+            "No clear face was detected. Remove hands or obstructions and keep one face visible.");
     }
 
     async function captureFrame() {
@@ -260,24 +204,17 @@
         }
 
         captureBtn.disabled = true;
-        status.textContent = "Starting liveness verification…";
+        status.textContent = "Checking for one clear face…";
 
         let verifiedFace;
         try {
             await loadModels();
-            if (requiresIdentityVerification()) {
-                verifiedFace = await completeLivenessChallenge();
-            } else {
-                verifiedFace = await detectLiveFace();
-                if (!verifiedFace) {
-                    throw new Error("Show exactly one clear face in the camera.");
-                }
-            }
+            verifiedFace = await verifyVisibleFace();
         } catch (err) {
-            console.warn("Liveness verification failed", err);
+            console.warn("Face verification failed", err);
             status.textContent = err && err.message
                 ? err.message
-                : "Liveness verification failed. Please try again.";
+                : "Face verification failed. Please try again.";
             captureBtn.disabled = false;
             return;
         }
@@ -300,7 +237,7 @@
 
         lastDataUrl = canvas.toDataURL("image/jpeg", 0.78);
         lastDescriptor = Array.from(verifiedFace.descriptor);
-        livenessPassed = true;
+        faceVerified = true;
         preview.src = lastDataUrl;
 
         captureBtn.disabled = false;
@@ -310,7 +247,7 @@
         captureBtn.hidden = true;
         retakeBtn.hidden = false;
         confirmBtn.hidden = false;
-        status.textContent = "Face and liveness verified. Click Confirm to submit.";
+        status.textContent = "Face verified. Click Confirm to submit.";
     }
 
     function submitWithPhoto() {
@@ -330,8 +267,8 @@
         const form = currentForm;
         const hidden = form.querySelector('input[name="photo"]');
         if (hidden) hidden.value = lastDataUrl;
-        if (!lastDescriptor || !livenessPassed) {
-            status.textContent = "Complete face and liveness verification before submitting.";
+        if (!lastDescriptor || !faceVerified) {
+            status.textContent = "Complete face verification before submitting.";
             return;
         }
 
@@ -349,7 +286,7 @@
             setHidden("face_descriptor", JSON.stringify(lastDescriptor));
             setHidden("reference_descriptor",
                 referenceDescriptor ? JSON.stringify(referenceDescriptor) : "");
-            setHidden("liveness_proof", "blink-turn-v1");
+            setHidden("face_verification", "face-match-v1");
         }
 
         // Geolocation: attach lat/lng/accuracy when the user permits it.
@@ -388,7 +325,7 @@
             subtitle.textContent = "One last selfie before we close out your shift.";
         } else {
             modal.querySelector("#selfie-modal-title").textContent = "Selfie for check-in";
-            subtitle.textContent = "Verify your identity by blinking and turning your head.";
+            subtitle.textContent = "Show one clear face that matches your enrolled profile.";
         }
 
         openModal();

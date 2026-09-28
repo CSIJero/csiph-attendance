@@ -536,7 +536,7 @@ public class AttendanceController : AppController
         [FromForm(Name = "accuracy")] double? accuracy = null,
         [FromForm(Name = "face_descriptor")] string? faceDescriptor = null,
         [FromForm(Name = "reference_descriptor")] string? referenceDescriptor = null,
-        [FromForm(Name = "liveness_proof")] string? livenessProof = null,
+        [FromForm(Name = "face_verification")] string? faceVerification = null,
         [FromForm(Name = "activity_tag")] string? activityTag = null)
     {
         var me = await GetCurrentUserAsync();
@@ -699,11 +699,11 @@ public class AttendanceController : AppController
         }
 
         // ----- Face identity check -----------------------------------
-        if (!string.Equals(livenessProof, "blink-turn-v1", StringComparison.Ordinal)
+        if (!string.Equals(faceVerification, "face-match-v1", StringComparison.Ordinal)
             || !FaceDescriptor.TryParse(faceDescriptor, out var capturedDescriptor))
         {
             TempData.Flash(
-                "Face liveness verification was not completed. Please blink and turn your head when prompted.",
+                "Face verification was not completed. Make sure exactly one clear face is visible.",
                 "warning");
             return RedirectToAction("Index", "Dashboard");
         }
