@@ -230,9 +230,9 @@
         canvas.width = cw;
         canvas.height = ch;
         const ctx = canvas.getContext("2d");
-        // Mirror so the saved photo matches what the user sees on screen.
-        ctx.translate(cw, 0);
-        ctx.scale(-1, 1);
+        // Keep the stored image in the camera's native orientation. The live
+        // preview is mirrored with CSS only; face enrollment also stores the
+        // native orientation, so both verification inputs now match.
         ctx.drawImage(video, 0, 0, cw, ch);
 
         lastDataUrl = canvas.toDataURL("image/jpeg", 0.78);

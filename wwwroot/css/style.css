@@ -988,12 +988,11 @@ body.modal-open { overflow: hidden; }
     width: 100%;
     height: 100%;
     object-fit: cover;
-    /* Mirror the live preview so the user sees themselves naturally.
-       The captured image is mirrored on the canvas separately. */
+    /* Mirror only the live preview so the user sees themselves naturally. */
     transform: scaleX(-1);
 }
 .selfie-stage img {
-    /* Captured photo is already mirrored on the canvas, undo CSS mirror. */
+    /* Stored captures use the camera's native orientation. */
     transform: none;
 }
 .selfie-overlay {

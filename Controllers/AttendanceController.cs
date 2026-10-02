@@ -764,7 +764,9 @@ public class AttendanceController : AppController
             return RedirectToAction("Index", "Dashboard");
         }
 
-        var faceDistance = FaceHash.Distance(me.FaceHash, newHash);
+        var faceDistance = FaceHash.DistanceAllowHorizontalMirror(
+            me.FaceHash,
+            newHash);
         if (faceDistance > Constants.FaceMatchMaxDistance)
         {
             TempData.Flash(

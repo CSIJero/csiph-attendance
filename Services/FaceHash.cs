@@ -98,4 +98,46 @@ public static class FaceHash
         if (!ulong.TryParse(b, NumberStyles.HexNumber, CultureInfo.InvariantCulture, out var y)) return 64;
         return System.Numerics.BitOperations.PopCount(x ^ y);
     }
+
+    /// <summary>
+    /// Returns the smaller distance for the captured hash in its native and
+    /// horizontally mirrored orientations. Older check-in captures were saved
+    /// mirrored while face enrollment used the camera's native orientation.
+    /// Accepting both orientations keeps those existing profiles usable.
+    /// </summary>
+    public static int DistanceAllowHorizontalMirror(string? enrolled, string? captured)
+    {
+        var direct = Distance(enrolled, captured);
+        if (!TryMirrorHorizontally(captured, out var mirrored)) return direct;
+        return Math.Min(direct, Distance(enrolled, mirrored));
+    }
+
+    private static bool TryMirrorHorizontally(string? hash, out string mirrored)
+    {
+        mirrored = string.Empty;
+        if (string.IsNullOrEmpty(hash)
+            || !ulong.TryParse(
+                hash,
+                NumberStyles.HexNumber,
+                CultureInfo.InvariantCulture,
+                out var value))
+        {
+            return false;
+        }
+
+        ulong result = 0;
+        for (var y = 0; y < 8; y++)
+        {
+            for (var x = 0; x < 8; x++)
+            {
+                var sourceBit = y * 8 + x;
+                if ((value & (1UL << sourceBit)) == 0) continue;
+                var targetBit = y * 8 + (7 - x);
+                result |= 1UL << targetBit;
+            }
+        }
+
+        mirrored = result.ToString("X16", CultureInfo.InvariantCulture);
+        return true;
+    }
 }
